@@ -207,6 +207,23 @@ jobs:
         run: pnpm tauri build --ci --target ${{ matrix.target }} --no-bundle
       - name: Bundle macOS .app
         run: pnpm tauri bundle --ci --target ${{ matrix.target }} --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'
+      # 仓库没配签名身份，Tauri 会完全跳过签名，.app 里就没有 _CodeSignature/，
+      # macOS（尤其 Apple Silicon）会直接报「应用已损坏，无法打开」。
+      # 这里做一次 ad-hoc 签名：不需要证书，也不会触发公证，
+      # 但 bundle 层会有合法签名，Gatekeeper 才会给出可以绕过的正常提示。
+      - name: Ad-hoc sign the .app bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="src-tauri/target/${{ matrix.target }}/release/bundle/macos/CC Switch.app"
+          if [ ! -d "$APP" ]; then
+            echo "::error::missing .app bundle at $APP"
+            exit 1
+          fi
+          codesign --force --sign - "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv --verbose=4 "$APP" 2>&1 | head -12
+          ls -la "$APP/Contents"
       # tauri 打 dmg 时会把 .app 挪进 dmg 再删掉 bundle/macos 下的源目录，
       # 所以先自己留一份副本，后面的暂存步骤用它来出 .app.zip 和兜底 dmg。
       - name: Keep a copy of the .app bundle
@@ -288,6 +305,13 @@ jobs:
             exit 1
           fi
           file "$MNT/CC Switch.app/Contents/MacOS/cc-switch"
+          # dmg 里这份 .app 也必须是签过名的，否则用户打开还是「已损坏」
+          codesign --verify --deep --strict "$MNT/CC Switch.app"
+          codesign -dv "$MNT/CC Switch.app" 2>&1 | head -8
+          if [ ! -d "$MNT/CC Switch.app/Contents/_CodeSignature" ]; then
+            echo "::error::the app inside the dmg is not signed"
+            exit 1
+          fi
 
           rm -rf "$RUNNER_TEMP/appzip"
           mkdir -p "$RUNNER_TEMP/appzip"
@@ -296,8 +320,9 @@ jobs:
             echo "::error::app.zip does not contain an executable cc-switch"
             exit 1
           fi
+          codesign --verify --deep --strict "$RUNNER_TEMP/appzip/CC Switch.app"
           file "$RUNNER_TEMP/appzip/CC Switch.app/Contents/MacOS/cc-switch"
-          codesign -dv "$RUNNER_TEMP/appzip/CC Switch.app" 2>&1 | head -5 || true
+          codesign -dv "$RUNNER_TEMP/appzip/CC Switch.app" 2>&1 | head -8
       - uses: actions/upload-artifact@v7
         with:
           name: cc-switch-dsh-minimax-macos-${{ matrix.target }}
