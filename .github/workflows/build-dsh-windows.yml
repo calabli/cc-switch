@@ -1,4 +1,4 @@
-name: Build Harness usage Windows
+name: Build Harness usage (Windows + macOS)
 on:
   workflow_dispatch:
   push:
@@ -49,6 +49,65 @@ jobs:
           name: cc-switch-dsh-minimax-windows-x64
           path: |
             src-tauri/target/release/cc-switch.exe
+            LICENSE
+          if-no-files-found: error
+          retention-days: 14
+
+  # macOS：两个架构分两台机器各编一次，产出裸二进制。
+  # 不打包（--no-bundle），所以不需要 Apple 证书和公证，也不需要 updater 签名密钥。
+  # 上游 release.yml 的 macos-binary 同款做法：签名和公证是另一段流程的事。
+  build-macos:
+    runs-on: macos-14
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [aarch64-apple-darwin, x86_64-apple-darwin]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+      - name: Read Rust toolchain
+        id: rust
+        shell: bash
+        run: |
+          channel=$(sed -nE 's/^channel *= *"([^"]+)".*/\1/p' rust-toolchain.toml)
+          test -n "$channel"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ steps.rust.outputs.channel }}
+          targets: ${{ matrix.target }}
+      # 缓存 key 里带上 target：两个架构共用 src-tauri/target，不区分会互相覆盖
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          workspaces: src-tauri -> target
+          key: macos-${{ matrix.target }}
+      - name: Install pinned pnpm
+        run: npm install --global --force --no-audit --no-fund https://registry.npmjs.org/pnpm/-/pnpm-10.12.3.tgz
+      - name: Get pnpm store directory
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v5
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-${{ runner.arch }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-pnpm-
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm build:renderer
+      - name: Build macOS binary
+        run: pnpm tauri build --target ${{ matrix.target }} --no-bundle
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cc-switch-dsh-minimax-macos-${{ matrix.target }}
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/cc-switch
             LICENSE
           if-no-files-found: error
           retention-days: 14
