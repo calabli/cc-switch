@@ -262,6 +262,42 @@ jobs:
           cp "src-tauri/target/$TARGET/release/cc-switch" "$OUT/cc-switch"
           cp LICENSE README.md "$OUT/"
           ls -la "$OUT"
+      # 把 dmg 挂载起来看一眼：确认它真能挂、里面有 .app 和 Applications 软链，
+      # 并且 .app 里的二进制架构和目标一致。发出去的 dmg 必须是能用的。
+      - name: Verify the dmg and the app bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          TARGET="${{ matrix.target }}"
+          OUT="release-assets"
+          DMG="$OUT/cc-switch-dsh-minimax-macos-$TARGET.dmg"
+          MNT="$RUNNER_TEMP/dmg-mount"
+          cleanup() { hdiutil detach "$MNT" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+
+          rm -rf "$MNT"
+          mkdir -p "$MNT"
+          hdiutil attach -nobrowse -readonly -mountpoint "$MNT" "$DMG"
+          ls -la "$MNT"
+          if [ ! -d "$MNT/CC Switch.app" ]; then
+            echo "::error::CC Switch.app is missing inside the dmg"
+            exit 1
+          fi
+          if [ ! -e "$MNT/Applications" ]; then
+            echo "::error::Applications symlink is missing inside the dmg"
+            exit 1
+          fi
+          file "$MNT/CC Switch.app/Contents/MacOS/cc-switch"
+
+          rm -rf "$RUNNER_TEMP/appzip"
+          mkdir -p "$RUNNER_TEMP/appzip"
+          ditto -x -k "$OUT/cc-switch-dsh-minimax-macos-$TARGET.app.zip" "$RUNNER_TEMP/appzip"
+          if [ ! -x "$RUNNER_TEMP/appzip/CC Switch.app/Contents/MacOS/cc-switch" ]; then
+            echo "::error::app.zip does not contain an executable cc-switch"
+            exit 1
+          fi
+          file "$RUNNER_TEMP/appzip/CC Switch.app/Contents/MacOS/cc-switch"
+          codesign -dv "$RUNNER_TEMP/appzip/CC Switch.app" 2>&1 | head -5 || true
       - uses: actions/upload-artifact@v7
         with:
           name: cc-switch-dsh-minimax-macos-${{ matrix.target }}
