@@ -126,12 +126,38 @@ jobs:
       # 单独再跑一遍只是重复。
       - name: Build EXE
         run: pnpm tauri build --ci --no-bundle
+      # Windows 的更新包是安装程序（上游也用 MSI）：tauri updater 下载它做静默更新。
+      # createUpdaterArtifacts 在 tauri.conf.json 里已经是 true，所以这里会同时
+      # 生成 .msi 和 .msi.sig（用 TAURI_SIGNING_PRIVATE_KEY 签名）。
+      - name: Bundle Windows MSI (updater package)
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm tauri bundle --ci --bundles msi
+      - name: Stage Windows release assets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path release-assets | Out-Null
+          Copy-Item 'src-tauri/target/release/cc-switch.exe' 'release-assets/cc-switch.exe'
+
+          $msi = Get-ChildItem -Path 'src-tauri/target/release/bundle/msi' -Filter *.msi -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($null -eq $msi) {
+            throw 'MSI not found under src-tauri/target/release/bundle/msi'
+          }
+          $sig = "$($msi.FullName).sig"
+          if (-not (Test-Path $sig)) {
+            throw "MSI signature not found: $sig"
+          }
+          Copy-Item $msi.FullName 'release-assets/'
+          Copy-Item $sig 'release-assets/'
+          Copy-Item 'LICENSE' 'release-assets/'
+          Copy-Item 'README.md' 'release-assets/'
+          Get-ChildItem release-assets | Select-Object Name, Length | Format-Table
       - uses: actions/upload-artifact@v7
         with:
           name: cc-switch-dsh-minimax-windows-x64
-          path: |
-            src-tauri/target/release/cc-switch.exe
-            LICENSE
+          path: release-assets/
           if-no-files-found: error
           retention-days: 14
 
@@ -205,27 +231,17 @@ jobs:
       - run: pnpm typecheck
       - name: Build macOS binary
         run: pnpm tauri build --ci --target ${{ matrix.target }} --no-bundle
-      - name: Bundle macOS .app
-        run: pnpm tauri bundle --ci --target ${{ matrix.target }} --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'
-      # 仓库没配签名身份，Tauri 会完全跳过签名，.app 里就没有 _CodeSignature/，
-      # macOS（尤其 Apple Silicon）会直接报「应用已损坏，无法打开」。
-      # 这里做一次 ad-hoc 签名：不需要证书，也不会触发公证，
-      # 但 bundle 层会有合法签名，Gatekeeper 才会给出可以绕过的正常提示。
-      - name: Ad-hoc sign the .app bundle
-        shell: bash
-        run: |
-          set -euo pipefail
-          APP="src-tauri/target/${{ matrix.target }}/release/bundle/macos/CC Switch.app"
-          if [ ! -d "$APP" ]; then
-            echo "::error::missing .app bundle at $APP"
-            exit 1
-          fi
-          codesign --force --sign - "$APP"
-          codesign --verify --deep --strict --verbose=2 "$APP"
-          codesign -dv --verbose=4 "$APP" 2>&1 | head -12
-          ls -la "$APP/Contents"
-      # tauri 打 dmg 时会把 .app 挪进 dmg 再删掉 bundle/macos 下的源目录，
-      # 所以先自己留一份副本，后面的暂存步骤用它来出 .app.zip 和兜底 dmg。
+      # APPLE_SIGNING_IDENTITY="-" 让 Tauri 用 codesign --sign - 做 ad-hoc 签名。
+      # 关键：签名发生在 Tauri 生成 .app.tar.gz（updater 包）之前，所以 updater
+      # 包里的 app 也是签过名的 —— 否则应用内更新完又会变成「应用已损坏」。
+      # 没有 Apple 证书和公证，notarize_auth() 找不到凭据只会 warning 跳过。
+      - name: Bundle macOS .app (+ updater package)
+        env:
+          APPLE_SIGNING_IDENTITY: "-"
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm tauri bundle --ci --target ${{ matrix.target }} --bundles app
+      # tauri 打 dmg 时会把 .app 挪走，所以下面用自己留的副本来打 dmg。
       - name: Keep a copy of the .app bundle
         shell: bash
         run: |
@@ -237,7 +253,8 @@ jobs:
           fi
           mkdir -p "$RUNNER_TEMP/app-bundle"
           ditto "$APP" "$RUNNER_TEMP/app-bundle/CC Switch.app"
-          ls -la "$RUNNER_TEMP/app-bundle/CC Switch.app"
+          codesign --verify --deep --strict --verbose=2 "$RUNNER_TEMP/app-bundle/CC Switch.app"
+          codesign -dv "$RUNNER_TEMP/app-bundle/CC Switch.app" 2>&1 | head -8
       # 自己用 hdiutil 打 DMG，不用 tauri 自带的 create-dmg：
       # create-dmg 在 CI 上（--skip-jenkins）打出来的镜像里，.app 会丢掉
       # Contents/Resources，codesign --verify 会判定「bundle 签名损坏」，
@@ -276,6 +293,7 @@ jobs:
         run: |
           set -euo pipefail
           TARGET="${{ matrix.target }}"
+          BUNDLE_DIR="src-tauri/target/$TARGET/release/bundle"
           APP="$RUNNER_TEMP/app-bundle/CC Switch.app"
           OUT="release-assets"
           mkdir -p "$OUT"
@@ -288,6 +306,19 @@ jobs:
             echo "::error::missing dmg"
             exit 1
           fi
+
+          # updater 包：.app.tar.gz + .sig。latest.json 里 darwin-* 指向它。
+          UPDATER="$(find "$BUNDLE_DIR/macos" -maxdepth 1 -name '*.app.tar.gz' -type f 2>/dev/null | head -1 || true)"
+          if [ -z "$UPDATER" ]; then
+            echo "::error::missing updater artifact ($BUNDLE_DIR/macos/*.app.tar.gz)"
+            exit 1
+          fi
+          if [ ! -f "$UPDATER.sig" ]; then
+            echo "::error::missing updater signature $UPDATER.sig"
+            exit 1
+          fi
+          cp "$UPDATER" "$OUT/cc-switch-dsh-minimax-macos-$TARGET.tar.gz"
+          cp "$UPDATER.sig" "$OUT/cc-switch-dsh-minimax-macos-$TARGET.tar.gz.sig"
 
           # .app 打成 zip（ditto 保留可执行权限和符号链接，普通 zip 会丢）
           ditto -c -k --sequesterRsrc --keepParent "$APP" \
@@ -360,6 +391,19 @@ jobs:
           codesign --verify --deep --strict "$RUNNER_TEMP/appzip/CC Switch.app"
           file "$RUNNER_TEMP/appzip/CC Switch.app/Contents/MacOS/cc-switch"
           codesign -dv "$RUNNER_TEMP/appzip/CC Switch.app" 2>&1 | head -8
+
+          # updater 包里的 app 也必须是签过名的，否则应用内更新完又会「已损坏」
+          rm -rf "$RUNNER_TEMP/updater"
+          mkdir -p "$RUNNER_TEMP/updater"
+          tar -xzf "$OUT/cc-switch-dsh-minimax-macos-$TARGET.tar.gz" -C "$RUNNER_TEMP/updater"
+          echo "--- updater 包里的结构 ---"
+          find "$RUNNER_TEMP/updater" -maxdepth 3 | sed "s#$RUNNER_TEMP/updater/##" | sort
+          if [ ! -d "$RUNNER_TEMP/updater/CC Switch.app/Contents/_CodeSignature" ]; then
+            echo "::error::the app inside the updater package is not signed"
+            exit 1
+          fi
+          codesign --verify --deep --strict "$RUNNER_TEMP/updater/CC Switch.app"
+          codesign -dv "$RUNNER_TEMP/updater/CC Switch.app" 2>&1 | head -8
       - uses: actions/upload-artifact@v7
         with:
           name: cc-switch-dsh-minimax-macos-${{ matrix.target }}

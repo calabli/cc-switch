@@ -1,0 +1,172 @@
+name: Sync upstream release
+
+# 上游 farion1231/cc-switch 发了新 release 之后，把上游的 tag 合进来，
+# bump 我们自己的版本号，然后 push 触发 build-dsh-windows.yml 出产物。
+#
+# 合不上的话不会硬来：merge 冲突时这个 job 直接失败并列出冲突文件，
+# 人工处理完再手动重跑（workflow_dispatch 可以指定版本）。
+on:
+  schedule:
+    # 每天 UTC 04:23。避开整点，GitHub 整点的定时任务排队最严重。
+    - cron: '23 4 * * *'
+  workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: '上游 release tag，例如 v4.0.19。留空 = 自动取最新'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: codex/dsh-usage
+          # 合并上游需要完整历史
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Resolve upstream tag
+        id: upstream
+        run: |
+          set -euo pipefail
+          tag="${{ inputs.upstream_tag }}"
+          if [ -z "$tag" ]; then
+            tag=$(curl -sSf https://api.github.com/repos/farion1231/cc-switch/releases/latest \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "upstream tag: $tag"
+
+      - name: Read current state
+        id: state
+        run: |
+          set -euo pipefail
+          current=$(python3 -c 'import json;print(json.load(open("src-tauri/tauri.conf.json"))["version"])')
+          synced=""
+          if [ -f .upstream-sync.json ]; then
+            synced=$(python3 -c 'import json;print(json.load(open(".upstream-sync.json")).get("upstream",""))')
+          fi
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "synced=$synced" >> "$GITHUB_OUTPUT"
+          echo "app version: $current, 已同步上游: ${synced:-<无>}"
+
+      - name: Check if already up to date
+        id: check
+        run: |
+          set -euo pipefail
+          tag="${{ steps.upstream.outputs.tag }}"
+          synced="${{ steps.state.outputs.synced }}"
+          forced="${{ inputs.upstream_tag }}"
+          if [ "$synced" = "$tag" ] && [ -z "$forced" ]; then
+            echo "need=false" >> "$GITHUB_OUTPUT"
+            echo "已经同步到 $tag，无需处理"
+          else
+            echo "need=true" >> "$GITHUB_OUTPUT"
+            if [ -n "$forced" ]; then
+              echo "手动指定 $tag，强制重新同步（同一上游版本重建时版本号 patch+1）"
+            else
+              echo "需要同步 $tag"
+            fi
+          fi
+
+      - name: Fetch and merge upstream tag
+        if: steps.check.outputs.need == 'true'
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.upstream.outputs.tag }}"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git config remote.upstream.promisor true
+          git config remote.upstream.partialclonefilter blob:none
+          git remote add upstream https://github.com/farion1231/cc-switch.git 2>/dev/null || true
+          git fetch --filter=blob:none --no-tags upstream "refs/tags/$TAG:refs/tags/$TAG"
+
+          if ! git merge --no-ff --no-edit "refs/tags/$TAG"; then
+            echo "::error::合并上游 $TAG 冲突，需要人工处理"
+            echo "--- 冲突文件 ---"
+            git diff --name-only --diff-filter=U || true
+            echo "--- 处理方法 ---"
+            echo "  git checkout codex/dsh-usage"
+            echo "  git fetch upstream 'refs/tags/$TAG:refs/tags/$TAG'"
+            echo "  git merge refs/tags/$TAG   # 手动解决冲突"
+            echo "  解决后 push，CI 会自动重新构建"
+            git merge --abort || true
+            exit 1
+          fi
+          echo "merge OK"
+
+      - name: Bump version and record sync state
+        id: bump
+        if: steps.check.outputs.need == 'true'
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.upstream.outputs.tag }}"
+          CURRENT="${{ steps.state.outputs.current }}"
+          NEW=$(python3 - "$TAG" "$CURRENT" <<'PY'
+          import sys, re
+          tag, current = sys.argv[1], sys.argv[2]
+          upstream = tag.lstrip("v")
+          def parse(v):
+              return tuple(int(x) for x in re.findall(r"\d+", v)[:3])
+          up, cur = parse(upstream), parse(current)
+          # 上游版本比当前新 -> 直接用上游版本号；
+          # 同一上游版本重建 -> patch+1，保证自更新时版本严格递增。
+          if up > cur:
+              print(upstream)
+          else:
+              print(f"{cur[0]}.{cur[1]}.{cur[2] + 1}")
+          PY
+          )
+          echo "版本: $CURRENT -> $NEW (上游 $TAG)"
+          echo "new=$NEW" >> "$GITHUB_OUTPUT"
+          python3 - "$NEW" <<'PY'
+          import sys, re
+          new = sys.argv[1]
+          path = "src-tauri/tauri.conf.json"
+          raw = open(path, encoding="utf-8").read()
+          raw, n = re.subn(r'("version"\s*:\s*")[^"]+(")', lambda m: m.group(1) + new + m.group(2), raw, count=1)
+          if n != 1:
+              raise SystemExit("failed to bump version")
+          open(path, "w", encoding="utf-8").write(raw)
+          PY
+          python3 - "$TAG" "$NEW" <<'PY'
+          import sys, json, datetime
+          tag, new = sys.argv[1], sys.argv[2]
+          state = {
+              "upstream": tag,
+              "version": new,
+              "synced_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+          }
+          with open(".upstream-sync.json", "w", encoding="utf-8") as fh:
+              json.dump(state, fh, indent=2, ensure_ascii=False)
+              fh.write("\n")
+          PY
+          cat .upstream-sync.json
+
+      - name: Commit and push
+        if: steps.check.outputs.need == 'true'
+        run: |
+          set -euo pipefail
+          git add src-tauri/tauri.conf.json .upstream-sync.json
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -m "chore(sync): merge upstream ${{ steps.upstream.outputs.tag }} and bump to ${{ steps.bump.outputs.new }}"
+          git push origin codex/dsh-usage
+          echo "已 push，build-dsh-windows.yml 会自动开始构建"
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "upstream tag : ${{ steps.upstream.outputs.tag }}"
+          echo "app version  : ${{ steps.state.outputs.current }}"
+          echo "已同步上游   : ${{ steps.state.outputs.synced }}"
