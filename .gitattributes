@@ -22,6 +22,11 @@
 *.css text eol=lf
 *.scss text eol=lf
 
+# SVG 图标：同样要钉死 eol=lf。漏掉的话 Windows runner 检出成 CRLF、macOS/Linux
+# 检出成 LF，文件内容不同 → vite 的内容哈希不同 → 同一份源码在两个平台产出的
+# 资源文件名对不上（连带引用它们的 JS chunk 也跟着变）。
+*.svg text eol=lf
+
 # Shell scripts
 *.sh text eol=lf
 
