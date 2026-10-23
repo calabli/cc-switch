@@ -207,6 +207,20 @@ jobs:
         run: pnpm tauri build --ci --target ${{ matrix.target }} --no-bundle
       - name: Bundle macOS .app
         run: pnpm tauri bundle --ci --target ${{ matrix.target }} --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'
+      # tauri 打 dmg 时会把 .app 挪进 dmg 再删掉 bundle/macos 下的源目录，
+      # 所以先自己留一份副本，后面的暂存步骤用它来出 .app.zip 和兜底 dmg。
+      - name: Keep a copy of the .app bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="src-tauri/target/${{ matrix.target }}/release/bundle/macos/CC Switch.app"
+          if [ ! -d "$APP" ]; then
+            echo "::error::missing .app bundle at $APP"
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/app-bundle"
+          ditto "$APP" "$RUNNER_TEMP/app-bundle/CC Switch.app"
+          ls -la "$RUNNER_TEMP/app-bundle/CC Switch.app"
       # dmg 单独一步且允许失败：万一 create-dmg 在 runner 上出问题，
       # 下面的暂存步骤会用 hdiutil 兜底出一个朴素但可用的 dmg。
       - name: Bundle macOS .dmg
@@ -218,7 +232,7 @@ jobs:
           set -euo pipefail
           TARGET="${{ matrix.target }}"
           BUNDLE_DIR="src-tauri/target/$TARGET/release/bundle"
-          APP="$BUNDLE_DIR/macos/CC Switch.app"
+          APP="$RUNNER_TEMP/app-bundle/CC Switch.app"
           OUT="release-assets"
           mkdir -p "$OUT"
 
