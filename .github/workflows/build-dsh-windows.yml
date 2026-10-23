@@ -135,9 +135,14 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # macOS：两个架构分两台机器各编一次，产出裸二进制。
-  # 不打包（--no-bundle），所以不需要 Apple 证书和公证，也不需要 updater 签名密钥。
-  # 上游 release.yml 的 macos-binary 同款做法：签名和公证是另一段流程的事。
+  # macOS：两个架构分两台机器各编一次，产出裸二进制 + .app + .dmg。
+  # 打包不需要 Apple 证书：CI 里没有签名身份，Tauri 也就不会去公证。
+  # 两个关键点：
+  #   1) --config 覆盖 createUpdaterArtifacts。仓库配置是 true，打包时会去生成
+  #      updater 的 .app.tar.gz 并要求私钥（TAURI_SIGNING_PRIVATE_KEY），我们既没有
+  #      密钥，也不发布更新包（应用内更新指向的是上游 farion1231/cc-switch）。
+  #   2) CI=true 时 Tauri 会给 create-dmg 传 --skip-jenkins，跳过 Finder 的
+  #      AppleScript 排版，所以没有图形界面也能在 runner 上打出 dmg。
   build-macos:
     runs-on: macos-14
     timeout-minutes: 90
@@ -200,11 +205,52 @@ jobs:
       - run: pnpm typecheck
       - name: Build macOS binary
         run: pnpm tauri build --ci --target ${{ matrix.target }} --no-bundle
+      - name: Bundle macOS .app
+        run: pnpm tauri bundle --ci --target ${{ matrix.target }} --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'
+      # dmg 单独一步且允许失败：万一 create-dmg 在 runner 上出问题，
+      # 下面的暂存步骤会用 hdiutil 兜底出一个朴素但可用的 dmg。
+      - name: Bundle macOS .dmg
+        continue-on-error: true
+        run: pnpm tauri bundle --ci --target ${{ matrix.target }} --bundles dmg --config '{"bundle":{"createUpdaterArtifacts":false}}'
+      - name: Stage macOS release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          TARGET="${{ matrix.target }}"
+          BUNDLE_DIR="src-tauri/target/$TARGET/release/bundle"
+          APP="$BUNDLE_DIR/macos/CC Switch.app"
+          OUT="release-assets"
+          mkdir -p "$OUT"
+
+          if [ ! -d "$APP" ]; then
+            echo "::error::missing .app bundle at $APP"
+            exit 1
+          fi
+
+          DMG="$(find "$BUNDLE_DIR/dmg" -maxdepth 1 -name '*.dmg' -type f 2>/dev/null | head -1 || true)"
+          if [ -z "$DMG" ]; then
+            echo "::warning::Tauri did not produce a dmg, falling back to hdiutil"
+            STAGE="$RUNNER_TEMP/dmg-stage"
+            rm -rf "$STAGE"
+            mkdir -p "$STAGE"
+            ditto "$APP" "$STAGE/CC Switch.app"
+            ln -s /Applications "$STAGE/Applications"
+            hdiutil create -volname "CC Switch" -srcfolder "$STAGE" -ov -format UDZO \
+              "$OUT/cc-switch-dsh-minimax-macos-$TARGET.dmg"
+          else
+            echo "using tauri dmg: $DMG"
+            cp "$DMG" "$OUT/cc-switch-dsh-minimax-macos-$TARGET.dmg"
+          fi
+
+          # .app 打成 zip（ditto 保留可执行权限和符号链接，普通 zip 会丢）
+          ditto -c -k --sequesterRsrc --keepParent "$APP" \
+            "$OUT/cc-switch-dsh-minimax-macos-$TARGET.app.zip"
+          cp "src-tauri/target/$TARGET/release/cc-switch" "$OUT/cc-switch"
+          cp LICENSE README.md "$OUT/"
+          ls -la "$OUT"
       - uses: actions/upload-artifact@v7
         with:
           name: cc-switch-dsh-minimax-macos-${{ matrix.target }}
-          path: |
-            src-tauri/target/${{ matrix.target }}/release/cc-switch
-            LICENSE
+          path: release-assets/
           if-no-files-found: error
           retention-days: 14
