@@ -1,0 +1,54 @@
+name: Build Harness usage Windows
+on:
+  workflow_dispatch:
+  push:
+    branches: ["codex/dsh-usage"]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+      - name: Read Rust toolchain
+        id: rust
+        run: |
+          $taskMatch = Select-String -Path rust-toolchain.toml -Pattern '^channel\s*=\s*"([^"]+)"'
+          if (-not $taskMatch) { throw 'Rust version missing' }
+          "channel=$($taskMatch.Matches[0].Groups[1].Value)" >> $env:GITHUB_OUTPUT
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ steps.rust.outputs.channel }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          workspaces: src-tauri -> target
+      - name: Install pinned pnpm
+        run: npm install --global --force --no-audit --no-fund https://registry.npmjs.org/pnpm/-/pnpm-10.12.3.tgz
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm build:renderer
+      - name: Usage importer regression tests
+        run: |
+          cargo test --release --locked --manifest-path src-tauri/Cargo.toml --lib session_usage_dsh
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --release --locked --manifest-path src-tauri/Cargo.toml --lib session_usage_mcode
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build EXE
+        run: pnpm tauri build --no-bundle
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cc-switch-dsh-minimax-windows-x64
+          path: |
+            src-tauri/target/release/cc-switch.exe
+            LICENSE
+          if-no-files-found: error
+          retention-days: 14

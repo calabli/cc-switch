@@ -12,7 +12,7 @@ import { useRequestLogs } from "@/lib/query/usage";
 import { TablePagination } from "./TablePagination";
 import { HelpTip } from "@/components/ui/help-tip";
 import { AppGlyph, APP_DISPLAY_NAME } from "@/components/shell/AppGlyph";
-import type { AppId } from "@/lib/api";
+import type { UsageGlyphApp as AppId } from "@/components/shell/AppGlyph";
 import {
   CACHE_INCLUSIVE_APP_TYPES,
   getFreshInputTokens,
@@ -121,6 +121,7 @@ const APP_SHORT_NAME: Record<AppId, string> = {
   hermes: "Hermes",
   pi: "Pi",
   mcode: "MiniMax",
+  dsh: "Harness",
   kimi: "Kimi",
   agy: "Antigravity",
 };

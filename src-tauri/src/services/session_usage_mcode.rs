@@ -107,10 +107,12 @@ fn sync_from_database(
 /// 取自产生它的那条 assistant 消息的 timestamp，而 pi 历史里的消息自带 model，按
 /// （会话, 时间戳）回查同一条消息。新版历史存在 pi_history_rows：MCode 写行时把消息的
 /// timestamp / role 抄进 created_at_ms / role 列，按列匹配，只解析命中的那条。旧版整段
-/// 存在 pi_history_json，每个会话只解析一次。哪张表不存在就跳过哪张。
+/// 存在 pi_history_json，每个会话只解析一次。桌面端另从 display message 的
+/// context_usage_telemetry.model 按会话、轮次唯一关联。哪张表不存在就跳过哪张。
 struct HistoryModels<'a> {
     rows: Option<rusqlite::Statement<'a>>,
     legacy: Option<rusqlite::Statement<'a>>,
+    desktop: Option<rusqlite::Statement<'a>>,
     legacy_by_session: HashMap<String, HashMap<i64, String>>,
 }
 
@@ -131,6 +133,20 @@ impl<'a> HistoryModels<'a> {
                      WHERE session_id = ?1 AND json_extract(message.value, '$.role') = 'assistant'",
                 )
                 .ok(),
+            desktop: source
+                .prepare(
+                    "SELECT DISTINCT COALESCE(
+                        NULLIF(TRIM(json_extract(m.data_json, '$.model')), ''),
+                        NULLIF(TRIM(json_extract(m.data_json, '$.context_usage_telemetry.model')), '')
+                     ) AS recovered_model
+                     FROM local_runtime_message_rows m
+                     JOIN local_runtime_token_usage u
+                       ON u.session_id = m.session_id AND u.turn_id = m.turn_id
+                     WHERE u.session_id = ?1 AND u.ts = ?2
+                       AND u.turn_id IS NOT NULL AND TRIM(u.turn_id) <> ''
+                       AND m.role = 'assistant' AND recovered_model IS NOT NULL",
+                )
+                .ok(),
             legacy_by_session: HashMap::new(),
         }
     }
@@ -138,6 +154,7 @@ impl<'a> HistoryModels<'a> {
     fn lookup(&mut self, session_id: &str, ts: i64) -> Option<String> {
         self.lookup_rows(session_id, ts)
             .or_else(|| self.lookup_legacy(session_id, ts))
+            .or_else(|| self.lookup_desktop(session_id, ts))
     }
 
     fn lookup_rows(&mut self, session_id: &str, ts: i64) -> Option<String> {
@@ -148,6 +165,23 @@ impl<'a> HistoryModels<'a> {
             }
         }
         None
+    }
+
+    // Desktop display-message timestamps differ from usage timestamps. Recover only
+    // when the same session and turn contain one distinct, nonempty model name.
+    // A turn containing multiple models remains unknown instead of being guessed.
+    fn lookup_desktop(&mut self, session_id: &str, ts: i64) -> Option<String> {
+        let mut rows = self.desktop.as_mut()?.query(params![session_id, ts]).ok()?;
+        let mut found: Option<String> = None;
+        while let Some(row) = rows.next().ok()? {
+            if let Some(model) = non_empty(row.get(0).ok().flatten()) {
+                if found.as_ref().is_some_and(|previous| previous != &model) {
+                    return None;
+                }
+                found = Some(model);
+            }
+        }
+        found
     }
 
     fn lookup_legacy(&mut self, session_id: &str, ts: i64) -> Option<String> {
@@ -182,6 +216,31 @@ fn non_empty(model: Option<String>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn desktop_models_require_an_unambiguous_session_and_turn() {
+        let source = rusqlite::Connection::open_in_memory().unwrap();
+        source.execute_batch(r#"
+            CREATE TABLE local_runtime_token_usage (session_id TEXT, turn_id TEXT, ts INTEGER);
+            CREATE TABLE local_runtime_message_rows
+                (session_id TEXT, turn_id TEXT, role TEXT, created_at_ms INTEGER, data_json TEXT);
+            INSERT INTO local_runtime_token_usage VALUES
+                ('s1','t1',1000),('s1','t2',2000),('s1','missing',3000),('s1','t3',4000);
+            INSERT INTO local_runtime_message_rows VALUES
+                ('s1','t1','assistant',900,'{"context_usage_telemetry":{"model":"MiniMax-M3.1-Flash"}}'),
+                ('s1','t1','assistant',950,'{"context_usage_telemetry":{"model":"MiniMax-M3.1-Flash"}}'),
+                ('s2','t1','assistant',900,'{"model":"other-session"}'),
+                ('s1','t1','user',900,'{"model":"user-model"}'),
+                ('s1','t2','assistant',1900,'{"model":"model-a"}'),
+                ('s1','t2','assistant',1950,'{"context_usage_telemetry":{"model":"model-b"}}'),
+                ('s1','t3','assistant',3900,'{"model":"  ","context_usage_telemetry":{"model":"fallback-model"}}');
+        "#).unwrap();
+        let mut history = HistoryModels::prepare(&source);
+        assert_eq!(history.lookup("s1", 1000).as_deref(), Some("MiniMax-M3.1-Flash"));
+        assert_eq!(history.lookup("s1", 2000), None);
+        assert_eq!(history.lookup("s1", 3000), None);
+        assert_eq!(history.lookup("s1", 4000).as_deref(), Some("fallback-model"));
+    }
+
     #[test]
     fn mcode_usage_preserves_model_namespaces() {
         let source = rusqlite::Connection::open_in_memory().unwrap();

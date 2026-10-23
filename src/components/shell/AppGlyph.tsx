@@ -3,8 +3,10 @@ import type { AppId } from "@/lib/api";
 import { ProviderIcon } from "@/components/ProviderIcon";
 import { cn } from "@/lib/utils";
 
+export type UsageGlyphApp = AppId | "dsh";
+
 /** 应用名：品牌名不翻译，四种语言都写原文。 */
-export const APP_DISPLAY_NAME: Record<AppId, string> = {
+export const APP_DISPLAY_NAME: Record<UsageGlyphApp, string> = {
   claude: "Claude Code",
   "claude-desktop": "Claude Desktop",
   codex: "Codex",
@@ -17,9 +19,10 @@ export const APP_DISPLAY_NAME: Record<AppId, string> = {
   mcode: "MiniMax Code",
   kimi: "Kimi Code",
   agy: "Antigravity",
+  dsh: "DeepSeekHarness",
 };
 
-const APP_ICON_NAME: Record<AppId, string> = {
+const APP_ICON_NAME: Record<UsageGlyphApp, string> = {
   claude: "claude",
   "claude-desktop": "claude",
   codex: "openai",
@@ -32,16 +35,17 @@ const APP_ICON_NAME: Record<AppId, string> = {
   mcode: "minimax",
   kimi: "kimi",
   agy: "antigravity",
+  dsh: "deepseek",
 };
 
 // Claude Code 和 Claude Desktop 用同一个图标，靠右下角的小角标区分终端与桌面
-const APP_BADGE_ICON: Partial<Record<AppId, typeof Terminal>> = {
+const APP_BADGE_ICON: Partial<Record<UsageGlyphApp, typeof Terminal>> = {
   claude: Terminal,
   "claude-desktop": Monitor,
 };
 
 interface AppGlyphProps {
-  app: AppId;
+  app: UsageGlyphApp;
   /** 图标边长：侧栏 16，页头 20 */
   size?: number;
   /** 角标底色要和所在的行一致，否则看起来像缺了一块 */
