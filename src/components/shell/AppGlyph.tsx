@@ -37,7 +37,7 @@ const APP_ICON_NAME: Record<UsageGlyphApp, string> = {
   kimi: "kimi",
   agy: "antigravity",
   dsh: "deepseek",
-  zcode: "zhipu",
+  zcode: "zcode",
 };
 
 // Claude Code 和 Claude Desktop 用同一个图标，靠右下角的小角标区分终端与桌面

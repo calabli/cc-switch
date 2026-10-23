@@ -762,6 +762,13 @@ export const iconMetadata: Record<string, IconMetadata> = {
     keywords: [],
     defaultColor: "currentColor",
   },
+  zcode: {
+    name: "zcode",
+    displayName: "ZCode",
+    category: "other",
+    keywords: ["zcode"],
+    defaultColor: "currentColor",
+  },
   zhipu: {
     name: "zhipu",
     displayName: "Zhipu AI",
