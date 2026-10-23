@@ -238,17 +238,44 @@ jobs:
           mkdir -p "$RUNNER_TEMP/app-bundle"
           ditto "$APP" "$RUNNER_TEMP/app-bundle/CC Switch.app"
           ls -la "$RUNNER_TEMP/app-bundle/CC Switch.app"
-      # dmg 单独一步且允许失败：万一 create-dmg 在 runner 上出问题，
-      # 下面的暂存步骤会用 hdiutil 兜底出一个朴素但可用的 dmg。
-      - name: Bundle macOS .dmg
-        continue-on-error: true
-        run: pnpm tauri bundle --ci --target ${{ matrix.target }} --bundles dmg --config '{"bundle":{"createUpdaterArtifacts":false}}'
+      # 自己用 hdiutil 打 DMG，不用 tauri 自带的 create-dmg：
+      # create-dmg 在 CI 上（--skip-jenkins）打出来的镜像里，.app 会丢掉
+      # Contents/Resources，codesign --verify 会判定「bundle 签名损坏」，
+      # 用户打开就是「应用已损坏」。这里从已签名的 .app 直接做目录镜像，
+      # 内容完全可控。
+      - name: Build macOS .dmg
+        shell: bash
+        run: |
+          set -euo pipefail
+          TARGET="${{ matrix.target }}"
+          APP="$RUNNER_TEMP/app-bundle/CC Switch.app"
+          STAGE="$RUNNER_TEMP/dmg-stage"
+          OUT="release-assets"
+          DMG="$OUT/cc-switch-dsh-minimax-macos-$TARGET.dmg"
+
+          if [ ! -d "$APP" ]; then
+            echo "::error::missing signed .app at $APP"
+            exit 1
+          fi
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE" "$OUT"
+          # ditto 会保留 _CodeSignature、权限和符号链接
+          ditto "$APP" "$STAGE/CC Switch.app"
+          ln -s /Applications "$STAGE/Applications"
+          cp src-tauri/icons/icon.icns "$STAGE/.VolumeIcon.icns"
+          find "$STAGE" -maxdepth 3 | sed "s#$STAGE#.#"
+
+          if ! hdiutil create -volname "CC Switch" -srcfolder "$STAGE" -fs HFS+ \
+               -fsargs "-c c=64,a=16,e=16" -format UDZO -ov "$DMG"; then
+            echo "::warning::hdiutil with fsargs failed, retrying with defaults"
+            hdiutil create -volname "CC Switch" -srcfolder "$STAGE" -format UDZO -ov "$DMG"
+          fi
+          ls -la "$DMG"
       - name: Stage macOS release assets
         shell: bash
         run: |
           set -euo pipefail
           TARGET="${{ matrix.target }}"
-          BUNDLE_DIR="src-tauri/target/$TARGET/release/bundle"
           APP="$RUNNER_TEMP/app-bundle/CC Switch.app"
           OUT="release-assets"
           mkdir -p "$OUT"
@@ -257,20 +284,9 @@ jobs:
             echo "::error::missing .app bundle at $APP"
             exit 1
           fi
-
-          DMG="$(find "$BUNDLE_DIR/dmg" -maxdepth 1 -name '*.dmg' -type f 2>/dev/null | head -1 || true)"
-          if [ -z "$DMG" ]; then
-            echo "::warning::Tauri did not produce a dmg, falling back to hdiutil"
-            STAGE="$RUNNER_TEMP/dmg-stage"
-            rm -rf "$STAGE"
-            mkdir -p "$STAGE"
-            ditto "$APP" "$STAGE/CC Switch.app"
-            ln -s /Applications "$STAGE/Applications"
-            hdiutil create -volname "CC Switch" -srcfolder "$STAGE" -ov -format UDZO \
-              "$OUT/cc-switch-dsh-minimax-macos-$TARGET.dmg"
-          else
-            echo "using tauri dmg: $DMG"
-            cp "$DMG" "$OUT/cc-switch-dsh-minimax-macos-$TARGET.dmg"
+          if [ ! -f "$OUT/cc-switch-dsh-minimax-macos-$TARGET.dmg" ]; then
+            echo "::error::missing dmg"
+            exit 1
           fi
 
           # .app 打成 zip（ditto 保留可执行权限和符号链接，普通 zip 会丢）
@@ -304,18 +320,39 @@ jobs:
             echo "::error::Applications symlink is missing inside the dmg"
             exit 1
           fi
+          echo "--- dmg 内 .app 的完整结构 ---"
+          find "$MNT/CC Switch.app" | sed "s#$MNT/##" | sort
+          # bundle 必须完整：Info.plist、Resources、_CodeSignature 一个都不能少，
+          # 少任何一个 codesign 都会判定签名损坏，用户看到的就是「应用已损坏」。
+          for required in \
+            "Contents/Info.plist" \
+            "Contents/Resources" \
+            "Contents/MacOS/cc-switch" \
+            "Contents/_CodeSignature"; do
+            if [ ! -e "$MNT/CC Switch.app/$required" ]; then
+              echo "::error::$required is missing inside the dmg's .app"
+              exit 1
+            fi
+          done
           file "$MNT/CC Switch.app/Contents/MacOS/cc-switch"
-          # dmg 里这份 .app 也必须是签过名的，否则用户打开还是「已损坏」
-          codesign --verify --deep --strict "$MNT/CC Switch.app"
+          codesign --verify --deep --strict --verbose=2 "$MNT/CC Switch.app"
           codesign -dv "$MNT/CC Switch.app" 2>&1 | head -8
-          if [ ! -d "$MNT/CC Switch.app/Contents/_CodeSignature" ]; then
-            echo "::error::the app inside the dmg is not signed"
-            exit 1
-          fi
 
           rm -rf "$RUNNER_TEMP/appzip"
           mkdir -p "$RUNNER_TEMP/appzip"
           ditto -x -k "$OUT/cc-switch-dsh-minimax-macos-$TARGET.app.zip" "$RUNNER_TEMP/appzip"
+          echo "--- app.zip 解开后的结构 ---"
+          find "$RUNNER_TEMP/appzip/CC Switch.app" | sed "s#$RUNNER_TEMP/appzip/##" | sort
+          for required in \
+            "Contents/Info.plist" \
+            "Contents/Resources" \
+            "Contents/MacOS/cc-switch" \
+            "Contents/_CodeSignature"; do
+            if [ ! -e "$RUNNER_TEMP/appzip/CC Switch.app/$required" ]; then
+              echo "::error::$required is missing inside the app.zip"
+              exit 1
+            fi
+          done
           if [ ! -x "$RUNNER_TEMP/appzip/CC Switch.app/Contents/MacOS/cc-switch" ]; then
             echo "::error::app.zip does not contain an executable cc-switch"
             exit 1
