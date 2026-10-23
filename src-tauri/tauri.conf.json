@@ -62,7 +62,7 @@
       }
     },
     "updater": {
-      "pubkey": "RWRKVTYMfMdnuh16FLQsJQ2y5/wtEVdSbld3CcVwJPfKe0bDzaZRuW/D",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXkgQkE2N0M3N0MwQzM2NTU0QQ0KUldSS1ZUWU1mTWRudWgxNkZMUXNKUTJ5NS93dEVWZFNibGQzQ2NWd0pQZktlMGJEemFaUnVXL0QNCg==",
       "endpoints": [
         "https://github.com/calabli/cc-switch/releases/latest/download/latest.json"
       ]
