@@ -129,10 +129,13 @@ jobs:
       # Windows 的更新包是安装程序（上游也用 MSI）：tauri updater 下载它做静默更新。
       # createUpdaterArtifacts 在 tauri.conf.json 里已经是 true，所以这里会同时
       # 生成 .msi 和 .msi.sig（用 TAURI_SIGNING_PRIVATE_KEY 签名）。
+      # 签名私钥要先规范化成 base64：Tauri 的 decode_key 是对整个环境变量做
+      # base64 解码，直接塞两行原文会解不开。
+      - uses: ./.github/actions/prepare-tauri-signing-key
+        with:
+          private-key: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          password: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       - name: Bundle Windows MSI (updater package)
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm tauri bundle --ci --bundles msi
       - name: Stage Windows release assets
         shell: pwsh
@@ -235,11 +238,15 @@ jobs:
       # 关键：签名发生在 Tauri 生成 .app.tar.gz（updater 包）之前，所以 updater
       # 包里的 app 也是签过名的 —— 否则应用内更新完又会变成「应用已损坏」。
       # 没有 Apple 证书和公证，notarize_auth() 找不到凭据只会 warning 跳过。
+      # 签名私钥要先规范化成 base64：Tauri 的 decode_key 是对整个环境变量做
+      # base64 解码，直接塞两行原文会解不开。
+      - uses: ./.github/actions/prepare-tauri-signing-key
+        with:
+          private-key: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          password: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       - name: Bundle macOS .app (+ updater package)
         env:
           APPLE_SIGNING_IDENTITY: "-"
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm tauri bundle --ci --target ${{ matrix.target }} --bundles app
       # tauri 打 dmg 时会把 .app 挪走，所以下面用自己留的副本来打 dmg。
       - name: Keep a copy of the .app bundle
