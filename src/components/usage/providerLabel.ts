@@ -15,6 +15,7 @@ const SESSION_PROVIDER_APPS: Record<string, UsageGlyphApp> = {
   "Grok Build (Session)": "grokbuild",
   "MiniMax Code (Session)": "mcode",
   "DeepSeekHarness (Session)": "dsh",
+  "ZCode (Session)": "zcode",
   "Kimi Code (Session)": "kimi",
   "Pi (Session)": "pi",
   "Antigravity (Session)": "agy",

@@ -564,6 +564,7 @@ export function UsageDashboard({
     return KNOWN_APP_TYPES.filter(
       (app) =>
         app === "dsh" ||
+        app === "zcode" ||
         visible[app] ||
         (app === "claude" && visible["claude-desktop"]) ||
         app === appType,

@@ -3,7 +3,7 @@ import type { AppId } from "@/lib/api";
 import { ProviderIcon } from "@/components/ProviderIcon";
 import { cn } from "@/lib/utils";
 
-export type UsageGlyphApp = AppId | "dsh";
+export type UsageGlyphApp = AppId | "dsh" | "zcode";
 
 /** 应用名：品牌名不翻译，四种语言都写原文。 */
 export const APP_DISPLAY_NAME: Record<UsageGlyphApp, string> = {
@@ -20,6 +20,7 @@ export const APP_DISPLAY_NAME: Record<UsageGlyphApp, string> = {
   kimi: "Kimi Code",
   agy: "Antigravity",
   dsh: "DeepSeekHarness",
+  zcode: "ZCode",
 };
 
 const APP_ICON_NAME: Record<UsageGlyphApp, string> = {
@@ -36,6 +37,7 @@ const APP_ICON_NAME: Record<UsageGlyphApp, string> = {
   kimi: "kimi",
   agy: "antigravity",
   dsh: "deepseek",
+  zcode: "zhipu",
 };
 
 // Claude Code 和 Claude Desktop 用同一个图标，靠右下角的小角标区分终端与桌面
