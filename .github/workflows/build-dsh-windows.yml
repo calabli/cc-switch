@@ -6,6 +6,62 @@ on:
 permissions:
   contents: read
 jobs:
+  # 回归测试单独一个 job，和构建并行跑。
+  # 原来测试排在 release 构建前面串行，缓存命中后也要白等 3.5 分钟（主 crate 的
+  # debug 编译）。拆开后墙钟从 test+build 变成 max(test, build)。
+  # 这个 job 纯 Rust，不需要 node/pnpm：beforeBuildCommand 是 tauri CLI 负责的，
+  # cargo test 不会调用它（run #3 验证过：dist/ 不存在也能跑通）。
+  test:
+    name: Usage importer regression tests
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Read Rust toolchain
+        id: rust
+        shell: bash
+        run: |
+          channel=$(sed -nE 's/^channel *= *"([^"]+)".*/\1/p' rust-toolchain.toml)
+          test -n "$channel"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ steps.rust.outputs.channel }}
+      # rust-cache 把「已安装的所有 toolchain」的版本号和 commit 哈希一起算进缓存 key。
+      # runner 镜像自带的那个 stable 一变（实测 1.99.1 → 1.99.0），key 就跟着变，
+      # 缓存永远 miss，741 个依赖每次全量重编。仓库只锁了 rust-toolchain.toml 里
+      # 的那一个版本，其余的都卸掉，key 才会稳定。
+      - name: Keep only the pinned toolchain (stable cache key)
+        shell: bash
+        env:
+          PINNED: ${{ steps.rust.outputs.channel }}
+        run: |
+          rustup toolchain list | awk '{print $1}' \
+            | grep -E '^[A-Za-z0-9][A-Za-z0-9._-]*-[A-Za-z0-9._-]+$' \
+            | while read -r tc; do
+                case "$tc" in
+                  # 锁定的 channel 可能以版本号形式装成 1.95.0-x86_64-…，也可能是
+                  # 1.95-x86_64-… 或 stable-x86_64-…，三种都要认。
+                  "$PINNED"|"$PINNED".*|"$PINNED"-*) echo "keep toolchain $tc" ;;
+                  *) echo "removing toolchain $tc"; rustup toolchain uninstall "$tc" || true ;;
+                esac
+              done
+          rustup toolchain list
+          rustup default
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          workspaces: src-tauri -> target
+      # 一次编译跑完所有 session_usage_* 模块的测试：过滤串 session_usage_ 同时覆盖
+      # session_usage_dsh / session_usage_mcode（原来分两条命令，各编一遍主 crate），
+      # 也顺带覆盖 agy/codex/gemini/grokbuild/kimi/opencode/pi 这些模块。
+      # 不加 --release：上游 ci.yml 的 nextest ci profile 用的就是 debug profile，
+      # 而这几个测试本身只跑 0.02 秒，release 编译纯属浪费十几分钟。
+      - name: Run usage importer tests
+        shell: bash
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --lib session_usage_
+
   build:
     runs-on: windows-2022
     timeout-minutes: 90
@@ -28,10 +84,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ steps.rust.outputs.channel }}
-      # rust-cache 把「已安装的所有 toolchain」的版本号和 commit 哈希一起算进缓存 key。
-      # runner 镜像自带的那个 stable 一变（实测 1.99.1 → 1.99.0），key 就跟着变，
-      # 缓存永远 miss，741 个依赖每次全量重编。仓库只锁了 rust-toolchain.toml 里
-      # 的那一个版本，其余的都卸掉，key 才会稳定。
+      # 同上：只留锁定的 toolchain，rust-cache 的 key 才稳定
       - name: Keep only the pinned toolchain (stable cache key)
         shell: pwsh
         env:
@@ -66,15 +119,6 @@ jobs:
             ${{ runner.os }}-${{ runner.arch }}-pnpm-
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
-      # 一次编译跑完所有 session_usage_* 模块的测试：过滤串 session_usage_ 同时覆盖
-      # session_usage_dsh / session_usage_mcode（原来分两条命令，各编一遍主 crate），
-      # 也顺带覆盖 agy/codex/gemini/grokbuild/kimi/opencode/pi 这些模块。
-      # 不加 --release：上游 ci.yml 的 nextest ci profile 用的就是 debug profile，
-      # 而这几个测试本身只跑 0.02 秒，release 编译纯属浪费十几分钟。
-      - name: Usage importer regression tests
-        run: |
-          cargo test --locked --manifest-path src-tauri/Cargo.toml --lib session_usage_
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       # 前端构建交给 tauri build 的 beforeBuildCommand（pnpm run build:renderer），
       # 单独再跑一遍只是重复。
       - name: Build EXE
@@ -126,8 +170,6 @@ jobs:
             | grep -E '^[A-Za-z0-9][A-Za-z0-9._-]*-[A-Za-z0-9._-]+$' \
             | while read -r tc; do
                 case "$tc" in
-                  # 锁定的 channel 可能以版本号形式装成 1.95.0-x86_64-…，也可能是
-                  # 1.95-x86_64-… 或 stable-x86_64-…，三种都要认。
                   "$PINNED"|"$PINNED".*|"$PINNED"-*) echo "keep toolchain $tc" ;;
                   *) echo "removing toolchain $tc"; rustup toolchain uninstall "$tc" || true ;;
                 esac
