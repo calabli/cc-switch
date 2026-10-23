@@ -28,20 +28,55 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ steps.rust.outputs.channel }}
+      # rust-cache 把「已安装的所有 toolchain」的版本号和 commit 哈希一起算进缓存 key。
+      # runner 镜像自带的那个 stable 一变（实测 1.99.1 → 1.99.0），key 就跟着变，
+      # 缓存永远 miss，741 个依赖每次全量重编。仓库只锁了 rust-toolchain.toml 里
+      # 的那一个版本，其余的都卸掉，key 才会稳定。
+      - name: Keep only the pinned toolchain (stable cache key)
+        shell: pwsh
+        env:
+          PINNED: ${{ steps.rust.outputs.channel }}
+        run: |
+          rustup toolchain list | ForEach-Object {
+            $tc = ($_ -split '\s+')[0]
+            if ($tc -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*-[A-Za-z0-9._-]+$') { return }
+            if ($tc -like "$env:PINNED*" -or $tc -like "$env:PINNED-*") {
+              Write-Host "keep toolchain $tc"
+            } else {
+              Write-Host "removing toolchain $tc"
+              rustup toolchain uninstall $tc
+              if ($LASTEXITCODE -ne 0) { Write-Warning "could not remove $tc" }
+            }
+          }
+          rustup toolchain list
+          rustup default
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         with:
           workspaces: src-tauri -> target
       - name: Install pinned pnpm
         run: npm install --global --force --no-audit --no-fund https://registry.npmjs.org/pnpm/-/pnpm-10.12.3.tgz
+      - name: Get pnpm store directory
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> $env:GITHUB_OUTPUT
+      - uses: actions/cache@v5
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-${{ runner.arch }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-pnpm-
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
-      - run: pnpm build:renderer
+      # 一次编译跑完所有 session_usage_* 模块的测试：过滤串 session_usage_ 同时覆盖
+      # session_usage_dsh / session_usage_mcode（原来分两条命令，各编一遍主 crate），
+      # 也顺带覆盖 agy/codex/gemini/grokbuild/kimi/opencode/pi 这些模块。
+      # 不加 --release：上游 ci.yml 的 nextest ci profile 用的就是 debug profile，
+      # 而这几个测试本身只跑 0.02 秒，release 编译纯属浪费十几分钟。
       - name: Usage importer regression tests
         run: |
-          cargo test --release --locked --manifest-path src-tauri/Cargo.toml --lib session_usage_dsh
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --lib session_usage_
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo test --release --locked --manifest-path src-tauri/Cargo.toml --lib session_usage_mcode
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      # 前端构建交给 tauri build 的 beforeBuildCommand（pnpm run build:renderer），
+      # 单独再跑一遍只是重复。
       - name: Build EXE
         run: pnpm tauri build --no-bundle
       - uses: actions/upload-artifact@v7
@@ -81,6 +116,24 @@ jobs:
         with:
           toolchain: ${{ steps.rust.outputs.channel }}
           targets: ${{ matrix.target }}
+      # 同上：卸掉镜像自带的 toolchain，rust-cache 的 key 才稳定
+      - name: Keep only the pinned toolchain (stable cache key)
+        shell: bash
+        env:
+          PINNED: ${{ steps.rust.outputs.channel }}
+        run: |
+          rustup toolchain list | awk '{print $1}' \
+            | grep -E '^[A-Za-z0-9][A-Za-z0-9._-]*-[A-Za-z0-9._-]+$' \
+            | while read -r tc; do
+                case "$tc" in
+                  # 锁定的 channel 可能以版本号形式装成 1.95.0-x86_64-…，也可能是
+                  # 1.95-x86_64-… 或 stable-x86_64-…，三种都要认。
+                  "$PINNED"|"$PINNED".*|"$PINNED"-*) echo "keep toolchain $tc" ;;
+                  *) echo "removing toolchain $tc"; rustup toolchain uninstall "$tc" || true ;;
+                esac
+              done
+          rustup toolchain list
+          rustup default
       # 缓存 key 里带上 target：两个架构共用 src-tauri/target，不区分会互相覆盖
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         with:
@@ -100,7 +153,6 @@ jobs:
             ${{ runner.os }}-${{ runner.arch }}-pnpm-
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
-      - run: pnpm build:renderer
       - name: Build macOS binary
         run: pnpm tauri build --target ${{ matrix.target }} --no-bundle
       - uses: actions/upload-artifact@v7
