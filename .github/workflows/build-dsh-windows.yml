@@ -5,6 +5,9 @@ on:
     branches: ["codex/dsh-usage"]
 permissions:
   contents: read
+concurrency:
+  group: harness-windows-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   build:
     runs-on: windows-2022
@@ -33,17 +36,41 @@ jobs:
           workspaces: src-tauri -> target
       - name: Install pinned pnpm
         run: npm install --global --force --no-audit --no-fund https://registry.npmjs.org/pnpm/-/pnpm-10.12.3.tgz
+      - name: Locate pnpm store
+        id: pnpm-store
+        run: '"path=$(pnpm store path --silent)" >> $env:GITHUB_OUTPUT'
+      - name: Cache pnpm packages
+        uses: actions/cache@v5
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-node20-pnpm10-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-node20-pnpm10-
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
-      - run: pnpm build:renderer
+      # Tauri's beforeBuildCommand builds dist exactly once, also needed by tests.
+      - name: Build EXE and frontend
+        run: pnpm tauri build --ci --no-bundle
+      # Compile one test executable; run both filters directly so Cargo cannot rebuild it.
+      - name: Compile usage tests once
+        run: |
+          $taskTestExe = cargo test --release --locked --manifest-path src-tauri/Cargo.toml --lib --no-run --message-format=json |
+            ForEach-Object {
+              if ($_ -match '^\{"reason":"compiler-artifact"') {
+                $taskArtifact = $_ | ConvertFrom-Json
+                if ($taskArtifact.executable -and $taskArtifact.profile.test -and $taskArtifact.target.name -eq 'cc_switch_lib') {
+                  $taskArtifact.executable
+                }
+              }
+            } | Select-Object -Last 1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not $taskTestExe) { throw 'Usage test executable not found' }
+          "USAGE_TEST_EXE=$taskTestExe" >> $env:GITHUB_ENV
       - name: Usage importer regression tests
         run: |
-          cargo test --release --locked --manifest-path src-tauri/Cargo.toml --lib session_usage_dsh
+          & $env:USAGE_TEST_EXE session_usage_dsh
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo test --release --locked --manifest-path src-tauri/Cargo.toml --lib session_usage_mcode
+          & $env:USAGE_TEST_EXE session_usage_mcode
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Build EXE
-        run: pnpm tauri build --no-bundle
       - uses: actions/upload-artifact@v7
         with:
           name: cc-switch-dsh-minimax-windows-x64
