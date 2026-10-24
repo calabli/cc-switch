@@ -22,8 +22,7 @@ pub fn local_summary(
     for app_type in LOCAL_SHARED_APP_TYPES {
         let summary = db.get_usage_summary(start, end, Some(app_type), None, None)?;
         // 本机的 UsageSummary 只给了成功率，成功条数按比例还原（够展示用）。
-        let success_count =
-            (summary.success_rate * summary.total_requests as f32).round() as u64;
+        let success_count = (summary.success_rate * summary.total_requests as f32).round() as u64;
         total = total.add(&LanUsageSummary {
             total_requests: summary.total_requests,
             total_cost: summary.total_cost.clone(),

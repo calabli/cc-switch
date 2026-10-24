@@ -43,17 +43,17 @@ pub async fn start(db: Arc<Database>, port: u16) -> Result<LanServerHandle, AppE
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
         .await
         .map_err(|e| AppError::Message(format!("局域网用量服务端口 {port} 绑定失败: {e}")))?;
-    let bound_port = listener
-        .local_addr()
-        .map(|a| a.port())
-        .unwrap_or(port);
+    let bound_port = listener.local_addr().map(|a| a.port()).unwrap_or(port);
 
     let (stop_tx, _initial_rx) = watch::channel(false);
 
     let http_stop = stop_tx.subscribe();
     let http_task = tokio::spawn(async move {
         let shutdown = wait_for_stop(http_stop);
-        if let Err(e) = axum::serve(listener, app).with_graceful_shutdown(shutdown).await {
+        if let Err(e) = axum::serve(listener, app)
+            .with_graceful_shutdown(shutdown)
+            .await
+        {
             log::error!("局域网用量 HTTP 服务退出: {e}");
         }
     });
@@ -127,7 +127,9 @@ async fn run_discovery_responder(
             socket.recv_from(&mut buf),
         )
         .await;
-        let Ok(Ok((len, peer))) = received else { continue };
+        let Ok(Ok((len, peer))) = received else {
+            continue;
+        };
         let probe = String::from_utf8_lossy(&buf[..len]);
         if !probe.trim().starts_with(super::DISCOVERY_MAGIC) {
             continue;
