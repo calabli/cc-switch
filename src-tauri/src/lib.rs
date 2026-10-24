@@ -21,10 +21,10 @@ mod gemini_mcp;
 mod grok_config;
 pub mod hermes_config;
 mod init_status;
-mod lan_usage;
 mod jsonc_document;
 mod kimi_config;
 mod kimi_session;
+mod lan_usage;
 mod lightweight;
 #[cfg(target_os = "linux")]
 mod linux_fix;

@@ -235,10 +235,16 @@ mod tests {
                 ('s1','t3','assistant',3900,'{"model":"  ","context_usage_telemetry":{"model":"fallback-model"}}');
         "#).unwrap();
         let mut history = HistoryModels::prepare(&source);
-        assert_eq!(history.lookup("s1", 1000).as_deref(), Some("MiniMax-M3.1-Flash"));
+        assert_eq!(
+            history.lookup("s1", 1000).as_deref(),
+            Some("MiniMax-M3.1-Flash")
+        );
         assert_eq!(history.lookup("s1", 2000), None);
         assert_eq!(history.lookup("s1", 3000), None);
-        assert_eq!(history.lookup("s1", 4000).as_deref(), Some("fallback-model"));
+        assert_eq!(
+            history.lookup("s1", 4000).as_deref(),
+            Some("fallback-model")
+        );
     }
 
     #[test]

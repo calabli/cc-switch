@@ -1,8 +1,6 @@
 //! 把「本机 + 各远端设备」汇成一份总览。
 
-use super::{
-    storage, LanDeviceUsage, LanUsageOverview, LanUsageSummary,
-};
+use super::{storage, LanDeviceUsage, LanUsageOverview, LanUsageSummary};
 use crate::database::Database;
 use crate::error::AppError;
 

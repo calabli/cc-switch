@@ -1,8 +1,8 @@
 //! 局域网用量的本地存储：登记设备、存对端拉回来的用量行、按设备聚合。
 
 use super::{
-    DailyRollupRow, LanDailyTotal, LanDeviceStatus, LanDeviceUsage, LanUsageSummary,
-    UsageEventRow, UsageExport,
+    DailyRollupRow, LanDailyTotal, LanDeviceStatus, LanDeviceUsage, LanUsageSummary, UsageEventRow,
+    UsageExport,
 };
 use crate::database::{lock_conn, Database};
 use crate::error::AppError;
@@ -87,12 +87,21 @@ pub fn device_endpoint(db: &Database, device_id: &str) -> Result<Option<(String,
 /// 移除一台设备，并清掉它拉回来的用量行。
 pub fn remove_device(db: &Database, device_id: &str) -> Result<(), AppError> {
     let conn = lock_conn!(db.conn);
-    conn.execute("DELETE FROM lan_usage_events WHERE device_id = ?1", params![device_id])
-        .map_err(|e| AppError::Database(e.to_string()))?;
-    conn.execute("DELETE FROM lan_usage_daily WHERE device_id = ?1", params![device_id])
-        .map_err(|e| AppError::Database(e.to_string()))?;
-    conn.execute("DELETE FROM lan_devices WHERE device_id = ?1", params![device_id])
-        .map_err(|e| AppError::Database(e.to_string()))?;
+    conn.execute(
+        "DELETE FROM lan_usage_events WHERE device_id = ?1",
+        params![device_id],
+    )
+    .map_err(|e| AppError::Database(e.to_string()))?;
+    conn.execute(
+        "DELETE FROM lan_usage_daily WHERE device_id = ?1",
+        params![device_id],
+    )
+    .map_err(|e| AppError::Database(e.to_string()))?;
+    conn.execute(
+        "DELETE FROM lan_devices WHERE device_id = ?1",
+        params![device_id],
+    )
+    .map_err(|e| AppError::Database(e.to_string()))?;
     Ok(())
 }
 
@@ -261,8 +270,9 @@ pub fn store_export(db: &Database, export: &UsageExport) -> Result<usize, AppErr
 /// 明细取 `proxy_request_logs` 里来源为会话导入的行；已经被收进按天汇总表的历史
 /// 从 `usage_daily_rollups` 取，并且跳过那些已经出现在汇总表里的日期，避免同一
 /// 天被算两遍。
-pub fn export_local_usage(db: &Database) -> Result<(Vec<UsageEventRow>, Vec<DailyRollupRow>), AppError>
-{
+pub fn export_local_usage(
+    db: &Database,
+) -> Result<(Vec<UsageEventRow>, Vec<DailyRollupRow>), AppError> {
     let conn = lock_conn!(db.conn);
     let sources = super::sql_in_list(&super::SHARED_DATA_SOURCES);
     let app_types = super::sql_in_list(&super::SHARED_APP_TYPES);
@@ -413,7 +423,8 @@ pub fn remote_summary(
         daily_params.push(Box::new(e.clone()));
     }
 
-    let (sql, params) = build_aggregate_query(&event_where, &daily_where, event_params, daily_params);
+    let (sql, params) =
+        build_aggregate_query(&event_where, &daily_where, event_params, daily_params);
     let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
     let row = conn.query_row(&sql, refs.as_slice(), summary_from_row);
     match row {
@@ -433,8 +444,7 @@ pub fn device_summary(
     let conn = lock_conn!(db.conn);
     let (start_date, end_date) = date_bounds(start, end);
 
-    let mut event_params: Vec<Box<dyn rusqlite::ToSql>> =
-        vec![Box::new(device_id.to_string())];
+    let mut event_params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(device_id.to_string())];
     let mut event_where: Vec<String> = vec!["e.device_id = ?".to_string()];
     if let Some(s) = start {
         event_where.push("e.created_at >= ?".to_string());
@@ -445,8 +455,7 @@ pub fn device_summary(
         event_params.push(Box::new(e));
     }
 
-    let mut daily_params: Vec<Box<dyn rusqlite::ToSql>> =
-        vec![Box::new(device_id.to_string())];
+    let mut daily_params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(device_id.to_string())];
     let mut daily_where: Vec<String> = vec!["d.device_id = ?".to_string()];
     if let Some(s) = &start_date {
         daily_where.push("d.date >= ?".to_string());
@@ -457,7 +466,8 @@ pub fn device_summary(
         daily_params.push(Box::new(e.clone()));
     }
 
-    let (sql, params) = build_aggregate_query(&event_where, &daily_where, event_params, daily_params);
+    let (sql, params) =
+        build_aggregate_query(&event_where, &daily_where, event_params, daily_params);
     let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
     let row = conn.query_row(&sql, refs.as_slice(), summary_from_row);
     match row {
@@ -799,10 +809,7 @@ mod tests {
             &UsageExport {
                 device: device("dev-a"),
                 events: vec![],
-                daily: vec![
-                    daily("2024-05-01", 3, 30),
-                    daily("2024-05-02", 4, 40),
-                ],
+                daily: vec![daily("2024-05-01", 3, 30), daily("2024-05-02", 4, 40)],
             },
         )
         .unwrap();

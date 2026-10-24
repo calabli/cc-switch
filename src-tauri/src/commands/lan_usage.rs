@@ -2,8 +2,8 @@
 
 use crate::error::AppError;
 use crate::lan_usage::{
-    aggregate, client, discovery, identity, storage, DeviceInfo, DiscoveredDevice,
-    LanDailyTotal, LanDeviceStatus, LanShareSettings, LanUsageOverview,
+    aggregate, client, discovery, identity, storage, DeviceInfo, DiscoveredDevice, LanDailyTotal,
+    LanDeviceStatus, LanShareSettings, LanUsageOverview,
 };
 use crate::store::AppState;
 use serde::{Deserialize, Serialize};

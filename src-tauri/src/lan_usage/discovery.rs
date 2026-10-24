@@ -41,17 +41,23 @@ pub async fn discover(port: u16, timeout_ms: u64) -> Result<Vec<DiscoveredDevice
         if info.device_id.trim().is_empty() {
             continue;
         }
-        found.entry(info.device_id.clone()).or_insert(DiscoveredDevice {
-            device_id: info.device_id,
-            device_name: info.device_name,
-            app_version: info.app_version,
-            host: peer.ip().to_string(),
-            port,
-        });
+        found
+            .entry(info.device_id.clone())
+            .or_insert(DiscoveredDevice {
+                device_id: info.device_id,
+                device_name: info.device_name,
+                app_version: info.app_version,
+                host: peer.ip().to_string(),
+                port,
+            });
     }
 
     let mut devices: Vec<DiscoveredDevice> = found.into_values().collect();
-    devices.sort_by(|a, b| a.device_name.to_lowercase().cmp(&b.device_name.to_lowercase()));
+    devices.sort_by(|a, b| {
+        a.device_name
+            .to_lowercase()
+            .cmp(&b.device_name.to_lowercase())
+    });
     Ok(devices)
 }
 

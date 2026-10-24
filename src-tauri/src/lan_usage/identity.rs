@@ -99,14 +99,21 @@ pub fn share_settings(db: &Database) -> LanShareSettings {
 
 /// 保存局域网共享设置。
 pub fn save_share_settings(db: &Database, settings: &LanShareSettings) -> Result<(), AppError> {
-    db.set_setting(SETTING_SHARE_ENABLED, if settings.enabled { "true" } else { "false" })?;
-    let port = if settings.port == 0 { DEFAULT_PORT } else { settings.port };
-    db.set_setting(SETTING_SHARE_PORT, &port.to_string())?;
     db.set_setting(
-        SETTING_DEVICE_NAME,
-        settings.device_name.trim(),
+        SETTING_SHARE_ENABLED,
+        if settings.enabled { "true" } else { "false" },
     )?;
-    db.set_setting(SETTING_AUTO_SYNC, if settings.auto_sync { "true" } else { "false" })?;
+    let port = if settings.port == 0 {
+        DEFAULT_PORT
+    } else {
+        settings.port
+    };
+    db.set_setting(SETTING_SHARE_PORT, &port.to_string())?;
+    db.set_setting(SETTING_DEVICE_NAME, settings.device_name.trim())?;
+    db.set_setting(
+        SETTING_AUTO_SYNC,
+        if settings.auto_sync { "true" } else { "false" },
+    )?;
     db.set_setting(
         SETTING_AUTO_SYNC_INTERVAL,
         &settings.auto_sync_interval_secs.to_string(),

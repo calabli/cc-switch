@@ -48,7 +48,10 @@ fn take_running() -> Option<server::LanServerHandle> {
 /// 把新启的服务装进全局槽位。槽位里已有服务时旧的那个会被停掉。
 fn install_running(handle: server::LanServerHandle) -> Result<u16, crate::error::AppError> {
     let port = handle.port;
-    let previous = SERVER_HANDLE.lock().ok().and_then(|mut guard| guard.replace(handle));
+    let previous = SERVER_HANDLE
+        .lock()
+        .ok()
+        .and_then(|mut guard| guard.replace(handle));
     if let Some(previous) = previous {
         previous.stop();
     }
@@ -58,7 +61,9 @@ fn install_running(handle: server::LanServerHandle) -> Result<u16, crate::error:
 /// 按当前设置确保局域网服务处于运行状态。
 ///
 /// 开着就启动，没开就停掉。重复调用是安全的：端口或设置没变时不会重启服务。
-pub async fn ensure_server(db: Arc<crate::database::Database>) -> Result<bool, crate::error::AppError> {
+pub async fn ensure_server(
+    db: Arc<crate::database::Database>,
+) -> Result<bool, crate::error::AppError> {
     let settings = identity::share_settings(&db);
 
     if !settings.enabled {
@@ -94,7 +99,10 @@ pub fn stop_server() {
 
 /// 局域网服务当前是否在跑，以及用的哪个端口。
 pub fn server_status() -> Option<u16> {
-    SERVER_HANDLE.lock().ok().and_then(|g| g.as_ref().map(|h| h.port))
+    SERVER_HANDLE
+        .lock()
+        .ok()
+        .and_then(|g| g.as_ref().map(|h| h.port))
 }
 
 /// 应用启动时调用：按设置启动共享服务，并拉起定时同步。
@@ -249,8 +257,12 @@ impl LanUsageSummary {
         let mut merged = LanUsageSummary {
             total_requests: self.total_requests.saturating_add(other.total_requests),
             total_cost: format!("{total_cost}"),
-            total_input_tokens: self.total_input_tokens.saturating_add(other.total_input_tokens),
-            total_output_tokens: self.total_output_tokens.saturating_add(other.total_output_tokens),
+            total_input_tokens: self
+                .total_input_tokens
+                .saturating_add(other.total_input_tokens),
+            total_output_tokens: self
+                .total_output_tokens
+                .saturating_add(other.total_output_tokens),
             total_cache_creation_tokens: self
                 .total_cache_creation_tokens
                 .saturating_add(other.total_cache_creation_tokens),
@@ -386,6 +398,10 @@ pub fn sql_in_list(values: &[&str]) -> String {
 /// 生成本地日期字符串（`YYYY-MM-DD`），和汇总表的 date 列同格式。
 pub fn local_date_string(ts: i64) -> String {
     chrono::DateTime::from_timestamp(ts, 0)
-        .map(|dt| dt.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string())
+        .map(|dt| {
+            dt.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d")
+                .to_string()
+        })
         .unwrap_or_else(|| "1970-01-01".to_string())
 }
