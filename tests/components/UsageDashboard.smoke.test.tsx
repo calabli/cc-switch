@@ -261,7 +261,7 @@ describe("UsageDashboard (smoke)", () => {
     await user.click(
       screen.getByRole("tab", { name: /^usage\.tabs\.providers/ }),
     );
-    const providerRow = (await screen.findByText("DeepSeek")).closest("tr")!;
+    const providerRow = await screen.findByRole("row", { name: /DeepSeek/ });
     expect(within(providerRow).getByText("92")).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: /^usage\.tabs\.models/ }));

@@ -7,7 +7,7 @@ import {
   fireEvent,
   within,
 } from "@testing-library/react";
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, beforeAll, vi } from "vitest";
 import { http, HttpResponse } from "msw";
 import { providersApi } from "@/lib/api/providers";
 import {
@@ -206,6 +206,11 @@ const renderApp = (AppComponent: ComponentType) => {
 };
 
 describe("App integration with MSW", () => {
+  // Load the cold module graph outside the per-interaction timeout.
+  beforeAll(async () => {
+    await import("@/App");
+  }, 60_000);
+
   beforeEach(() => {
     resetProviderState();
     toastSuccessMock.mockReset();
@@ -848,7 +853,9 @@ describe("App integration with MSW", () => {
     await waitFor(() =>
       expect(toastErrorMock).toHaveBeenCalledWith(
         "notifications.removeFromConfigFailed",
-        expect.objectContaining({ description: "kimi.error.defaultModelInUse" }),
+        expect.objectContaining({
+          description: "kimi.error.defaultModelInUse",
+        }),
       ),
     );
     await waitFor(() =>
