@@ -71,6 +71,10 @@ import { UsageHeatmap } from "./UsageHeatmap";
 import { MultiDeviceUsageTab } from "./MultiDeviceUsageTab";
 import { lanUsageApi } from "@/lib/api/lan";
 import {
+  UsageDataScopeProvider,
+  useUsageDataScope,
+} from "@/lib/query/usageScope";
+import {
   LOG_PAGE_SIZES,
   type LogPageSize,
   USAGE_CHOICE_KEYS,
@@ -249,7 +253,18 @@ interface UsageDashboardProps {
 /**
  * 用量统计全局页：页头 → 范围栏 → 概览面板（指标条 + 趋势图 / 热力图）→ 明细面板（请求日志 / 供应商 / 模型）。
  */
-export function UsageDashboard({
+export function UsageDashboard(props: UsageDashboardProps = {}) {
+  const [view, setView] = useState<"local" | "multi">("local");
+  return (
+    <UsageDataScopeProvider value={view === "multi"}>
+      <UsageDashboardContent {...props} view={view} setView={setView} />
+    </UsageDataScopeProvider>
+  );
+}
+
+function UsageDashboardContent({
+  view,
+  setView,
   refreshIntervalMs: savedRefreshIntervalMs,
   onRefreshIntervalChange,
   sessionAutoSyncEnabled = true,
@@ -259,14 +274,20 @@ export function UsageDashboard({
   onOpenRoutingSettings,
   usageDisplay,
   onUsageDisplayChange,
-}: UsageDashboardProps = {}) {
+}: UsageDashboardProps & {
+  view: "local" | "multi";
+  setView: (value: "local" | "multi") => void;
+}) {
   const { t, i18n } = useTranslation();
   const queryClient = useQueryClient();
-  const [view, setView] = useState<"local" | "multi">("local");
+  const { api: scopedUsageApi, scopeKey } = useUsageDataScope();
   const [lastDeviceSyncAt, setLastDeviceSyncAt] = useState<number | null>(null);
   const refreshDevices = useCallback(async () => {
     const results = await lanUsageApi.syncAll();
     await queryClient.invalidateQueries({ queryKey: ["lan-usage"] });
+    await queryClient.invalidateQueries({
+      queryKey: [...usageKeys.all, "multi-device"],
+    });
     const failures = results.filter((result) => result.error);
     if (failures.length)
       throw new Error(
@@ -483,8 +504,8 @@ export function UsageDashboard({
   );
   // 有没有任何用量（不分时间范围）：一条都没有时显示空状态
   const { data: allTimeSummary } = useQuery({
-    queryKey: [...usageKeys.all, "all-time-summary"],
-    queryFn: () => usageApi.getUsageSummary(),
+    queryKey: scopeKey([...usageKeys.all, "all-time-summary"]),
+    queryFn: () => scopedUsageApi.getUsageSummary(),
     refetchInterval: refetch.refetchInterval,
   });
   const isEmpty = allTimeSummary != null && allTimeSummary.totalRequests === 0;

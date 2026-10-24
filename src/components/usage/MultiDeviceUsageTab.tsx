@@ -31,7 +31,7 @@ export function MultiDeviceUsageTab({ range }: { range: UsageRangeSelection }) {
         {t("usage.lan.manageDevices")}
       </Button>
       <span role="status" className="text-caption text-fg-3">
-        {t("usage.lan.uiPreviewHint")}
+        {t("usage.lan.aggregationScope")}
       </span>
       <Sheet open={manageOpen} onOpenChange={setManageOpen}>
         <SheetContent

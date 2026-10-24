@@ -332,6 +332,17 @@ describe("UsageDashboard (smoke)", () => {
     ).toBeInTheDocument();
   });
   it("reuses the complete original dashboard and filters in the multi-device UI", async () => {
+    usageApiMock.getUsageSummaryByApp.mockImplementation(
+      async (...args: unknown[]) => [
+        {
+          appType: "codex",
+          summary: {
+            ...summary,
+            totalRequests: args.at(-1) === true ? 3140 : 3120,
+          },
+        },
+      ],
+    );
     const user = userEvent.setup();
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },
@@ -351,7 +362,10 @@ describe("UsageDashboard (smoke)", () => {
       "aria-pressed",
       "true",
     );
-    expect(screen.getByText("usage.lan.uiPreviewHint")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: /usage.totalRequests 3,140/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("usage.lan.aggregationScope")).toBeInTheDocument();
     expect(
       screen.getByRole("table", { name: "usage.requestLogs" }),
     ).toBeInTheDocument();
@@ -371,6 +385,7 @@ describe("UsageDashboard (smoke)", () => {
       "codex",
       undefined,
       undefined,
+      true,
     );
     await user.click(screen.getByRole("tab", { name: /^usage.tabs.models/ }));
     expect(await screen.findByText("kimi-k2.6")).toBeInTheDocument();
@@ -398,8 +413,8 @@ describe("UsageDashboard (smoke)", () => {
       "true",
     );
     expect(
-      screen.queryByText("usage.lan.uiPreviewHint"),
-    ).not.toBeInTheDocument();
+      await screen.findByRole("button", { name: /usage.totalRequests 3,120/ }),
+    ).toBeInTheDocument();
     client.clear();
   });
 });

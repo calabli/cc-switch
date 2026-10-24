@@ -61,11 +61,13 @@ pub async fn sync_device(db: &Database, device_id: &str) -> Result<usize, AppErr
     };
 
     match fetch_export(&host, port).await {
-        Ok(mut export) => {
+        Ok(export) => {
             // 对端的 device_id 才是权威：防止有人改了 URL 指向别的机器，
             // 导致数据串到错误的设备名下。
             if export.device.device_id != device_id {
-                export.device.device_id = device_id.to_string();
+                let error = "设备身份不匹配，请重新连接设备";
+                storage::record_sync_result(db, device_id, 0, Some(error))?;
+                return Err(AppError::Message(error.to_string()));
             }
             let written = storage::store_export(db, &export)?;
             storage::record_sync_result(db, device_id, written as i64, None)?;

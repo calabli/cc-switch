@@ -1,10 +1,6 @@
-import {
-  keepPreviousData,
-  useQuery,
-  useMutation,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { usageApi } from "@/lib/api/usage";
+import { useUsageDataScope, sameUsageScope } from "./usageScope";
 import { resolveUsageRange } from "@/lib/usageRange";
 import type {
   LogFilters,
@@ -182,18 +178,21 @@ export function useUsageSummary(
   filters?: UsageScopeFilters,
   options?: UsageQueryOptions,
 ) {
+  const { api, multiDevice, scopeKey } = useUsageDataScope();
   const effective = normalizeScopeFilters(filters);
   return useQuery({
-    queryKey: usageKeys.summary(
-      range.preset,
-      range.customStartDate,
-      range.customEndDate,
-      effective,
-      range.liveEndTime,
+    queryKey: scopeKey(
+      usageKeys.summary(
+        range.preset,
+        range.customStartDate,
+        range.customEndDate,
+        effective,
+        range.liveEndTime,
+      ),
     ),
     queryFn: () => {
       const { startDate, endDate } = resolveUsageRange(range);
-      return usageApi.getUsageSummary(
+      return api.getUsageSummary(
         startDate,
         endDate,
         effective.appType,
@@ -201,7 +200,8 @@ export function useUsageSummary(
         effective.model,
       );
     },
-    placeholderData: keepPreviousData,
+    placeholderData: (previous, query) =>
+      sameUsageScope(query?.queryKey, multiDevice) ? previous : undefined,
     refetchInterval: options?.refetchInterval ?? DEFAULT_REFETCH_INTERVAL_MS,
     refetchIntervalInBackground: options?.refetchIntervalInBackground ?? false,
   });
@@ -212,24 +212,28 @@ export function useUsageSummaryByApp(
   filters?: Pick<UsageScopeFilters, "providerName" | "model">,
   options?: UsageQueryOptions,
 ) {
+  const { api, multiDevice, scopeKey } = useUsageDataScope();
   return useQuery({
-    queryKey: usageKeys.summaryByApp(
-      range.preset,
-      range.customStartDate,
-      range.customEndDate,
-      filters,
-      range.liveEndTime,
+    queryKey: scopeKey(
+      usageKeys.summaryByApp(
+        range.preset,
+        range.customStartDate,
+        range.customEndDate,
+        filters,
+        range.liveEndTime,
+      ),
     ),
     queryFn: () => {
       const { startDate, endDate } = resolveUsageRange(range);
-      return usageApi.getUsageSummaryByApp(
+      return api.getUsageSummaryByApp(
         startDate,
         endDate,
         filters?.providerName,
         filters?.model,
       );
     },
-    placeholderData: keepPreviousData,
+    placeholderData: (previous, query) =>
+      sameUsageScope(query?.queryKey, multiDevice) ? previous : undefined,
     refetchInterval: options?.refetchInterval ?? DEFAULT_REFETCH_INTERVAL_MS,
     refetchIntervalInBackground: options?.refetchIntervalInBackground ?? false,
   });
@@ -240,18 +244,21 @@ export function useUsageTrends(
   filters?: UsageScopeFilters,
   options?: UsageQueryOptions,
 ) {
+  const { api, multiDevice, scopeKey } = useUsageDataScope();
   const effective = normalizeScopeFilters(filters);
   return useQuery({
-    queryKey: usageKeys.trends(
-      range.preset,
-      range.customStartDate,
-      range.customEndDate,
-      effective,
-      range.liveEndTime,
+    queryKey: scopeKey(
+      usageKeys.trends(
+        range.preset,
+        range.customStartDate,
+        range.customEndDate,
+        effective,
+        range.liveEndTime,
+      ),
     ),
     queryFn: () => {
       const { startDate, endDate } = resolveUsageRange(range);
-      return usageApi.getUsageTrends(
+      return api.getUsageTrends(
         startDate,
         endDate,
         effective.appType,
@@ -260,7 +267,8 @@ export function useUsageTrends(
       );
     },
     enabled: options?.enabled ?? true,
-    placeholderData: keepPreviousData,
+    placeholderData: (previous, query) =>
+      sameUsageScope(query?.queryKey, multiDevice) ? previous : undefined,
     refetchInterval: options?.refetchInterval ?? DEFAULT_REFETCH_INTERVAL_MS,
     refetchIntervalInBackground: options?.refetchIntervalInBackground ?? false,
   });
@@ -271,16 +279,18 @@ export function useUsageFirstDate(
   filters?: UsageScopeFilters,
   options?: UsageQueryOptions,
 ) {
+  const { api, multiDevice, scopeKey } = useUsageDataScope();
   const effective = normalizeScopeFilters(filters);
   return useQuery({
-    queryKey: usageKeys.firstDate(effective),
+    queryKey: scopeKey(usageKeys.firstDate(effective)),
     queryFn: () =>
-      usageApi.getUsageFirstDate(
+      api.getUsageFirstDate(
         effective.appType,
         effective.providerName,
         effective.model,
       ),
-    placeholderData: keepPreviousData,
+    placeholderData: (previous, query) =>
+      sameUsageScope(query?.queryKey, multiDevice) ? previous : undefined,
     refetchInterval: options?.refetchInterval ?? DEFAULT_REFETCH_INTERVAL_MS,
     refetchIntervalInBackground: options?.refetchIntervalInBackground ?? false,
   });
@@ -291,18 +301,21 @@ export function useProviderStats(
   filters?: UsageScopeFilters,
   options?: UsageQueryOptions,
 ) {
+  const { api, multiDevice, scopeKey } = useUsageDataScope();
   const effective = normalizeScopeFilters(filters);
   return useQuery({
-    queryKey: usageKeys.providerStats(
-      range.preset,
-      range.customStartDate,
-      range.customEndDate,
-      effective,
-      range.liveEndTime,
+    queryKey: scopeKey(
+      usageKeys.providerStats(
+        range.preset,
+        range.customStartDate,
+        range.customEndDate,
+        effective,
+        range.liveEndTime,
+      ),
     ),
     queryFn: () => {
       const { startDate, endDate } = resolveUsageRange(range);
-      return usageApi.getProviderStats(
+      return api.getProviderStats(
         startDate,
         endDate,
         effective.appType,
@@ -310,7 +323,8 @@ export function useProviderStats(
         effective.model,
       );
     },
-    placeholderData: keepPreviousData,
+    placeholderData: (previous, query) =>
+      sameUsageScope(query?.queryKey, multiDevice) ? previous : undefined,
     enabled: options?.enabled ?? true,
     refetchInterval: options?.refetchInterval ?? DEFAULT_REFETCH_INTERVAL_MS,
     refetchIntervalInBackground: options?.refetchIntervalInBackground ?? false,
@@ -322,18 +336,21 @@ export function useModelStats(
   filters?: UsageScopeFilters,
   options?: UsageQueryOptions,
 ) {
+  const { api, multiDevice, scopeKey } = useUsageDataScope();
   const effective = normalizeScopeFilters(filters);
   return useQuery({
-    queryKey: usageKeys.modelStats(
-      range.preset,
-      range.customStartDate,
-      range.customEndDate,
-      effective,
-      range.liveEndTime,
+    queryKey: scopeKey(
+      usageKeys.modelStats(
+        range.preset,
+        range.customStartDate,
+        range.customEndDate,
+        effective,
+        range.liveEndTime,
+      ),
     ),
     queryFn: () => {
       const { startDate, endDate } = resolveUsageRange(range);
-      return usageApi.getModelStats(
+      return api.getModelStats(
         startDate,
         endDate,
         effective.appType,
@@ -341,7 +358,8 @@ export function useModelStats(
         effective.model,
       );
     },
-    placeholderData: keepPreviousData,
+    placeholderData: (previous, query) =>
+      sameUsageScope(query?.queryKey, multiDevice) ? previous : undefined,
     enabled: options?.enabled ?? true,
     refetchInterval: options?.refetchInterval ?? DEFAULT_REFETCH_INTERVAL_MS,
     refetchIntervalInBackground: options?.refetchIntervalInBackground ?? false,
@@ -355,6 +373,7 @@ export function useRequestLogs({
   pageSize = 20,
   options,
 }: RequestLogsQueryArgs) {
+  const { api, multiDevice, scopeKey } = useUsageDataScope();
   const key: RequestLogsKey = {
     preset: range.preset,
     customStartDate: range.customStartDate,
@@ -367,12 +386,13 @@ export function useRequestLogs({
   };
 
   return useQuery({
-    queryKey: usageKeys.logs(key, page, pageSize),
+    queryKey: scopeKey(usageKeys.logs(key, page, pageSize)),
     queryFn: () => {
       const effectiveFilters = { ...filters, ...resolveUsageRange(range) };
-      return usageApi.getRequestLogs(effectiveFilters, page, pageSize);
+      return api.getRequestLogs(effectiveFilters, page, pageSize);
     },
-    placeholderData: keepPreviousData,
+    placeholderData: (previous, query) =>
+      sameUsageScope(query?.queryKey, multiDevice) ? previous : undefined,
     enabled: options?.enabled ?? true,
     refetchInterval: options?.refetchInterval ?? DEFAULT_REFETCH_INTERVAL_MS, // 每30秒自动刷新
     refetchIntervalInBackground: options?.refetchIntervalInBackground ?? false,
@@ -380,9 +400,10 @@ export function useRequestLogs({
 }
 
 export function useRequestDetail(requestId: string) {
+  const { api, scopeKey } = useUsageDataScope();
   return useQuery({
-    queryKey: usageKeys.detail(requestId),
-    queryFn: () => usageApi.getRequestDetail(requestId),
+    queryKey: scopeKey(usageKeys.detail(requestId)),
+    queryFn: () => api.getRequestDetail(requestId),
     enabled: !!requestId,
   });
 }

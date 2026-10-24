@@ -378,7 +378,7 @@ fn row_to_request_log_detail(row: &rusqlite::Row<'_>) -> rusqlite::Result<Reques
 /// Session logs use placeholder provider_ids (e.g., `_session`, `_<app>_session`)
 /// that don't exist in the providers table — the CASE expression below is the
 /// authoritative mapping from placeholder to readable name.
-fn provider_name_coalesce(log_alias: &str, provider_alias: &str) -> String {
+pub(crate) fn provider_name_coalesce(log_alias: &str, provider_alias: &str) -> String {
     format!(
         "COALESCE({provider_alias}.name, CASE {log_alias}.provider_id \
          WHEN '_session' THEN 'Claude (Session)' \
@@ -478,7 +478,15 @@ fn push_provider_model_filters(
     }
 }
 
+/// The projection reserves `lan@<hex device id>|` as an origin namespace.
+/// Native IDs keep the empty origin; copies from different devices cannot deduplicate each other.
+fn same_usage_origin_sql(left: &str, right: &str) -> String {
+    let origin = |alias: &str| format!("CASE WHEN substr({alias}.request_id, 1, 4) = 'lan@' THEN substr({alias}.request_id, 1, instr({alias}.request_id, '|')) ELSE '' END");
+    format!("({}) = ({})", origin(left), origin(right))
+}
+
 pub(crate) fn effective_usage_log_filter(log_alias: &str) -> String {
+    let origin_match = same_usage_origin_sql("proxy_dedup", log_alias);
     let data_source = data_source_expr(log_alias);
     let proxy_data_source = data_source_expr("proxy_dedup");
     let app_type_match =
@@ -490,6 +498,7 @@ pub(crate) fn effective_usage_log_filter(log_alias: &str) -> String {
                 SELECT 1
                 FROM proxy_request_logs proxy_dedup
                 WHERE {proxy_data_source} = 'proxy'
+                  AND {origin_match}
                   AND {app_type_match}
                   AND proxy_dedup.status_code >= 200
                   AND proxy_dedup.status_code < 300
@@ -569,6 +578,7 @@ pub(crate) fn effective_usage_log_filter_for_range(
         return Ok(effective_usage_log_filter(log_alias));
     }
 
+    let origin_match = same_usage_origin_sql("dedup_p", "dedup_s");
     let dp_source = data_source_expr("dedup_p");
     let ds_source = data_source_expr("dedup_s");
     Ok(format!(
@@ -580,6 +590,7 @@ pub(crate) fn effective_usage_log_filter_for_range(
                      dedup_p.app_type,
                      CASE WHEN dedup_p.app_type = 'claude-desktop' THEN 'claude' ELSE dedup_p.app_type END
                  )
+             AND {origin_match}
              AND {ds_source} IN ({DEDUP_SESSION_SOURCES_SQL})
              AND dedup_s.input_tokens = dedup_p.input_tokens
              AND dedup_s.output_tokens = dedup_p.output_tokens

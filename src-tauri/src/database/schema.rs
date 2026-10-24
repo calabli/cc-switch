@@ -1660,6 +1660,9 @@ impl Database {
     /// 明细与按天汇总互斥：同一台设备的同一天只会有其中一种粒度，
     /// 所以聚合时直接相加不会重复计数。
     fn create_lan_usage_tables(conn: &Connection) -> Result<(), AppError> {
+        conn.execute("CREATE TABLE IF NOT EXISTS lan_usage_snapshots (
+            device_id TEXT PRIMARY KEY, payload TEXT NOT NULL
+        )", []).map_err(|e| AppError::Database(e.to_string()))?;
         conn.execute(
             "CREATE TABLE IF NOT EXISTS lan_devices (
                 device_id TEXT PRIMARY KEY,

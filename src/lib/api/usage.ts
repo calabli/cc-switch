@@ -56,8 +56,10 @@ export const usageApi = {
     appType?: string,
     providerName?: string,
     model?: string,
+    multiDevice?: boolean,
   ): Promise<UsageSummary> => {
     return invoke("get_usage_summary", {
+      multiDevice,
       startDate,
       endDate,
       appType,
@@ -78,8 +80,10 @@ export const usageApi = {
     endDate?: number,
     providerName?: string,
     model?: string,
+    multiDevice?: boolean,
   ): Promise<UsageSummaryByApp[]> => {
     return invoke("get_usage_summary_by_app", {
+      multiDevice,
       startDate,
       endDate,
       providerName,
@@ -93,8 +97,10 @@ export const usageApi = {
     appType?: string,
     providerName?: string,
     model?: string,
+    multiDevice?: boolean,
   ): Promise<DailyStats[]> => {
     return invoke("get_usage_trends", {
+      multiDevice,
       startDate,
       endDate,
       appType,
@@ -108,8 +114,10 @@ export const usageApi = {
     appType?: string,
     providerName?: string,
     model?: string,
+    multiDevice?: boolean,
   ): Promise<string | null> => {
     return invoke("get_usage_first_date", {
+      multiDevice,
       appType,
       providerName,
       model,
@@ -122,8 +130,10 @@ export const usageApi = {
     appType?: string,
     providerName?: string,
     model?: string,
+    multiDevice?: boolean,
   ): Promise<ProviderStats[]> => {
     return invoke("get_provider_stats", {
+      multiDevice,
       startDate,
       endDate,
       appType,
@@ -138,8 +148,10 @@ export const usageApi = {
     appType?: string,
     providerName?: string,
     model?: string,
+    multiDevice?: boolean,
   ): Promise<ModelStats[]> => {
     return invoke("get_model_stats", {
+      multiDevice,
       startDate,
       endDate,
       appType,
@@ -152,16 +164,21 @@ export const usageApi = {
     filters: LogFilters,
     page: number = 0,
     pageSize: number = 20,
+    multiDevice?: boolean,
   ): Promise<PaginatedLogs> => {
     return invoke("get_request_logs", {
+      multiDevice,
       filters,
       page,
       pageSize,
     });
   },
 
-  getRequestDetail: async (requestId: string): Promise<RequestLog | null> => {
-    return invoke("get_request_detail", { requestId });
+  getRequestDetail: async (
+    requestId: string,
+    multiDevice?: boolean,
+  ): Promise<RequestLog | null> => {
+    return invoke("get_request_detail", { requestId, multiDevice });
   },
 
   getModelPricing: async (): Promise<ModelPricing[]> => {

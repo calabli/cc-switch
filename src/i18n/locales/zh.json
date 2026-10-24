@@ -2608,7 +2608,8 @@
       "manualConnect": "按地址连接",
       "trendScopeHint": "当前趋势仅包含已同步的远端历史汇总。",
       "uiPreviewHint": "多设备聚合待接入，当前显示本机用量。",
-      "sameFiltersHint": "按当前时间、应用、供应商和模型筛选，汇总本机及已连接设备的用量。"
+      "sameFiltersHint": "按当前时间、应用、供应商和模型筛选，汇总本机及已连接设备的用量。",
+      "aggregationScope": "按相同筛选条件合计本机与已连接设备的用量。"
     }
   },
   "usageScript": {

@@ -2608,7 +2608,8 @@
       "sourcesHint": "All apps are selected by default. Deselecting an app removes its imported copy on the peer after the next successful sync; local records are kept. Configure each computer separately.",
       "trendScopeHint": "Trends currently include synced remote historical rollups only.",
       "uiPreviewHint": "Multi-device aggregation is pending. Showing local usage.",
-      "sameFiltersHint": "Combine this device and connected devices using the same time, app, provider and model filters."
+      "sameFiltersHint": "Combine this device and connected devices using the same time, app, provider and model filters.",
+      "aggregationScope": "This device and connected devices combined under the same filters."
     }
   },
   "usageScript": {

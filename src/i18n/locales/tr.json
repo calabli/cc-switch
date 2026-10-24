@@ -2532,7 +2532,8 @@
       "sourcesHint": "Varsayılan olarak tüm uygulamalar seçilidir. Seçimi kaldırılan uygulamanın kopyası sonraki başarılı eşitlemede diğer cihazdan silinir; yerel kayıtlar korunur. Her bilgisayarı ayrı yapılandırın.",
       "trendScopeHint": "Grafik şu anda yalnızca eşitlenmiş uzak geçmiş özetlerini içerir.",
       "uiPreviewHint": "Çoklu cihaz birleştirmesi henüz bağlı değil. Yerel kullanım gösteriliyor.",
-      "sameFiltersHint": "Bu cihaz ve bağlı cihazların kullanımını aynı zaman, uygulama, sağlayıcı ve model filtreleriyle birleştirin."
+      "sameFiltersHint": "Bu cihaz ve bağlı cihazların kullanımını aynı zaman, uygulama, sağlayıcı ve model filtreleriyle birleştirin.",
+      "aggregationScope": "Bu cihaz ve bağlı cihazların aynı filtrelerle birleştirilmiş kullanımı."
     }
   },
   "usageScript": {

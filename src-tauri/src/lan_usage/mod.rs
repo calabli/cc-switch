@@ -6,6 +6,7 @@ pub mod aggregate;
 pub mod client;
 pub mod discovery;
 pub mod identity;
+pub mod projection;
 pub mod server;
 pub mod storage;
 
@@ -172,10 +173,26 @@ pub struct DeviceInfo {
     pub started_at: i64,
 }
 
+/// Statistical metadata only. Never includes provider settings, keys or message content.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct UsageMetadata {
+    pub provider_id: String,
+    pub provider_name: String,
+    pub request_model: Option<String>,
+    pub pricing_model: Option<String>,
+    pub first_token_ms: Option<i64>,
+    pub duration_ms: Option<i64>,
+    pub is_streaming: bool,
+    pub cost_multiplier: Option<String>,
+}
+
 /// 一条用量明细（对端从本地文件解析出来的请求级记录）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageEventRow {
+    #[serde(flatten)]
+    pub metadata: UsageMetadata,
     pub request_id: String,
     pub data_source: String,
     pub app_type: String,
@@ -203,6 +220,8 @@ pub struct UsageEventRow {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DailyRollupRow {
+    #[serde(flatten)]
+    pub metadata: UsageMetadata,
     pub date: String,
     pub app_type: String,
     pub model: String,
@@ -221,6 +240,8 @@ pub struct DailyRollupRow {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageExport {
+    #[serde(default)]
+    pub snapshot_version: u32,
     pub device: DeviceInfo,
     /// None means an older peer: preserve its previously imported sources.
     /// Some([]) explicitly revokes every shared source on the next successful sync.

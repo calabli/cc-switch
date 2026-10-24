@@ -1,7 +1,7 @@
 //! 局域网用量的本地存储：登记设备、存对端拉回来的用量行、按设备聚合。
 
 use super::{
-    DailyRollupRow, LanDailyTotal, LanDeviceStatus, LanDeviceUsage, LanUsageSummary, UsageEventRow,
+    DailyRollupRow, LanDailyTotal, LanDeviceStatus, LanDeviceUsage, LanUsageSummary, UsageEventRow, UsageMetadata,
     UsageExport,
 };
 use crate::database::{lock_conn, Database};
@@ -97,6 +97,8 @@ pub fn remove_device(db: &Database, device_id: &str) -> Result<(), AppError> {
         params![device_id],
     )
     .map_err(|e| AppError::Database(e.to_string()))?;
+    conn.execute("DELETE FROM lan_usage_snapshots WHERE device_id = ?1", params![device_id])
+        .map_err(|e| AppError::Database(e.to_string()))?;
     conn.execute(
         "DELETE FROM lan_devices WHERE device_id = ?1",
         params![device_id],
@@ -143,11 +145,45 @@ pub fn record_sync_result(
 ///
 /// 这样同一台设备的同一天永远只有一种粒度，聚合时直接相加不会重复计数。
 pub fn store_export(db: &Database, export: &UsageExport) -> Result<usize, AppError> {
+    let mut sanitized = export.clone();
+    if let Some(apps) = &export.shared_app_types {
+        let apps = super::normalize_shared_app_types(apps);
+        sanitized.events.retain(|row| apps.contains(&row.app_type));
+        sanitized.daily.retain(|row| apps.contains(&row.app_type));
+        sanitized.shared_app_types = Some(apps);
+    }
+    let payload = serde_json::to_string(&sanitized).map_err(|e| AppError::Message(e.to_string()))?;
+    // Legacy status panels have fewer dimensions. Collapse their copy only;
+    // the canonical snapshot above retains provider and pricing dimensions.
+    let mut daily = std::collections::BTreeMap::new();
+    for row in std::mem::take(&mut sanitized.daily) {
+        let key = (row.date.clone(), row.app_type.clone(), row.model.clone());
+        daily.entry(key).and_modify(|total: &mut DailyRollupRow| {
+            let requests = total.request_count.saturating_add(row.request_count);
+            total.avg_latency_ms = if requests > 0 { (total.avg_latency_ms.saturating_mul(total.request_count).saturating_add(row.avg_latency_ms.saturating_mul(row.request_count))) / requests } else { 0 };
+            total.request_count = requests;
+            total.success_count = total.success_count.saturating_add(row.success_count);
+            total.input_tokens = total.input_tokens.saturating_add(row.input_tokens);
+            total.output_tokens = total.output_tokens.saturating_add(row.output_tokens);
+            total.cache_read_tokens = total.cache_read_tokens.saturating_add(row.cache_read_tokens);
+            total.cache_creation_tokens = total.cache_creation_tokens.saturating_add(row.cache_creation_tokens);
+            total.total_cost_usd = (total.total_cost_usd.parse::<f64>().unwrap_or(0.0) + row.total_cost_usd.parse::<f64>().unwrap_or(0.0)).to_string();
+        }).or_insert(row);
+    }
+    sanitized.daily = daily.into_values().collect();
+    let export = &sanitized;
     let device_id = export.device.device_id.as_str();
     let mut conn = lock_conn!(db.conn);
     let tx = conn
         .transaction()
         .map_err(|e| AppError::Database(e.to_string()))?;
+    tx.execute("INSERT INTO lan_usage_snapshots (device_id, payload) VALUES (?1, ?2)
+        ON CONFLICT(device_id) DO UPDATE SET payload = excluded.payload", params![device_id, payload])
+        .map_err(|e| AppError::Database(e.to_string()))?;
+    if export.snapshot_version >= 2 {
+        tx.execute("DELETE FROM lan_usage_events WHERE device_id = ?1", [device_id]).map_err(|e| AppError::Database(e.to_string()))?;
+        tx.execute("DELETE FROM lan_usage_daily WHERE device_id = ?1", [device_id]).map_err(|e| AppError::Database(e.to_string()))?;
+    }
     let now = chrono::Utc::now().timestamp();
     let mut written = 0usize;
 
@@ -308,6 +344,7 @@ pub fn export_local_usage(db: &Database) -> Result<UsageExport, AppError> {
     let selected = super::normalize_shared_app_types(&settings.shared_app_types);
     if selected.is_empty() {
         return Ok(UsageExport {
+            snapshot_version: 2,
             device,
             shared_app_types: Some(selected),
             events: Vec::new(),
@@ -319,6 +356,8 @@ pub fn export_local_usage(db: &Database) -> Result<UsageExport, AppError> {
     let conn = lock_conn!(db.conn);
 
     let mut events = Vec::new();
+    let provider_name = crate::services::usage_stats::provider_name_coalesce("l", "p");
+    let effective = crate::services::usage_stats::effective_usage_log_filter("l");
     {
         let mut stmt = conn
             .prepare(&format!(
@@ -326,12 +365,16 @@ pub fn export_local_usage(db: &Database) -> Result<UsageExport, AppError> {
                         l.input_tokens, l.output_tokens, l.cache_read_tokens, l.cache_creation_tokens,
                         l.input_token_semantics, l.input_cost_usd, l.output_cost_usd,
                         l.cache_read_cost_usd, l.cache_creation_cost_usd, l.total_cost_usd,
-                        l.status_code, l.latency_ms, l.created_at
-                 FROM proxy_request_logs l
-                 WHERE l.app_type IN ({app_types})
+                        l.status_code, l.latency_ms, l.created_at,
+                        l.provider_id, {provider_name}, l.request_model, l.pricing_model,
+                        l.first_token_ms, l.duration_ms, l.is_streaming, l.cost_multiplier
+                 FROM proxy_request_logs l LEFT JOIN providers p ON l.provider_id = p.id AND l.app_type = p.app_type
+                 WHERE l.app_type IN ({app_types}) AND {effective}
                    AND NOT EXISTS (
                      SELECT 1 FROM usage_daily_rollups r
-                     WHERE r.app_type = l.app_type
+                     WHERE r.app_type = l.app_type AND r.provider_id = l.provider_id
+                       AND r.model = l.model AND r.request_model = COALESCE(l.request_model, '')
+                       AND r.pricing_model = COALESCE(l.pricing_model, '')
                        AND r.date = date(datetime(l.created_at, 'unixepoch', 'localtime'))
                    )"
             ))
@@ -339,6 +382,10 @@ pub fn export_local_usage(db: &Database) -> Result<UsageExport, AppError> {
         let rows = stmt
             .query_map([], |row| {
                 Ok(UsageEventRow {
+                    metadata: UsageMetadata {
+                        provider_id: row.get(18)?, provider_name: row.get(19)?, request_model: row.get(20)?,
+                        pricing_model: row.get(21)?, first_token_ms: row.get(22)?, duration_ms: row.get(23)?, is_streaming: row.get(24)?, cost_multiplier: row.get(25)?,
+                    },
                     request_id: row.get(0)?,
                     data_source: row.get(1)?,
                     app_type: row.get(2)?,
@@ -367,21 +414,27 @@ pub fn export_local_usage(db: &Database) -> Result<UsageExport, AppError> {
 
     let mut daily = Vec::new();
     let fresh_input = fresh_input_sql("r");
+    let provider_name = crate::services::usage_stats::provider_name_coalesce("r", "p");
     {
         let mut stmt = conn
             .prepare(&format!(
                 "SELECT r.date, r.app_type, r.model, SUM(r.request_count), SUM(r.success_count),
                         SUM({fresh_input}), SUM(r.output_tokens), SUM(r.cache_read_tokens), SUM(r.cache_creation_tokens),
                         2, CAST(SUM(CAST(r.total_cost_usd AS REAL)) AS TEXT),
-                        CAST(COALESCE(SUM(r.avg_latency_ms * r.request_count) * 1.0 / NULLIF(SUM(r.request_count), 0), 0) AS INTEGER)
-                 FROM usage_daily_rollups r
+                        CAST(COALESCE(SUM(r.avg_latency_ms * r.request_count) * 1.0 / NULLIF(SUM(r.request_count), 0), 0) AS INTEGER),
+                        r.provider_id, {provider_name}, r.request_model, r.pricing_model
+                 FROM usage_daily_rollups r LEFT JOIN providers p ON r.provider_id = p.id AND r.app_type = p.app_type
                  WHERE r.app_type IN ({app_types})
-                 GROUP BY r.date, r.app_type, r.model"
+                 GROUP BY r.date, r.app_type, r.model, r.provider_id, r.request_model, r.pricing_model"
             ))
             .map_err(|e| AppError::Database(e.to_string()))?;
         let rows = stmt
             .query_map([], |row| {
                 Ok(DailyRollupRow {
+                    metadata: UsageMetadata {
+                        provider_id: row.get(12)?, provider_name: row.get(13)?, request_model: row.get(14)?, pricing_model: row.get(15)?,
+                        ..Default::default()
+                    },
                     date: row.get(0)?,
                     app_type: row.get(1)?,
                     model: row.get(2)?,
@@ -403,6 +456,7 @@ pub fn export_local_usage(db: &Database) -> Result<UsageExport, AppError> {
     }
 
     Ok(UsageExport {
+        snapshot_version: 2,
         device,
         shared_app_types: Some(selected),
         events,
@@ -686,6 +740,7 @@ mod tests {
 
     fn event(id: &str, created_at: i64, input: i64) -> UsageEventRow {
         UsageEventRow {
+            metadata: Default::default(),
             request_id: id.to_string(),
             data_source: "dsh_session".to_string(),
             app_type: "dsh".to_string(),
@@ -709,6 +764,7 @@ mod tests {
 
     fn daily(date: &str, requests: i64, input: i64) -> DailyRollupRow {
         DailyRollupRow {
+            metadata: Default::default(),
             date: date.to_string(),
             app_type: "dsh".to_string(),
             model: "fixture".to_string(),
@@ -744,7 +800,7 @@ mod tests {
         register_device(&db, "dev-a", "A", "10.0.0.2", 17890).unwrap();
         let ts = ts_for("2024-05-01");
         let export = UsageExport {
-            device: device("dev-a"),
+            snapshot_version: 0, device: device("dev-a"),
             shared_app_types: None,
             events: vec![event("r1", ts, 100), event("r2", ts + 60, 200)],
             daily: vec![],
@@ -767,7 +823,7 @@ mod tests {
         let ts = ts_for("2024-05-01");
 
         let detail = UsageExport {
-            device: device("dev-a"),
+            snapshot_version: 0, device: device("dev-a"),
             shared_app_types: None,
             events: vec![event("r1", ts, 100), event("r2", ts + 60, 200)],
             daily: vec![],
@@ -781,7 +837,7 @@ mod tests {
         );
 
         let rolled = UsageExport {
-            device: device("dev-a"),
+            snapshot_version: 0, device: device("dev-a"),
             shared_app_types: None,
             events: vec![],
             daily: vec![daily("2024-05-01", 7, 999)],
@@ -802,7 +858,7 @@ mod tests {
         let ts = ts_for("2024-05-01");
 
         let rolled = UsageExport {
-            device: device("dev-a"),
+            snapshot_version: 0, device: device("dev-a"),
             shared_app_types: None,
             events: vec![],
             daily: vec![daily("2024-05-01", 7, 999)],
@@ -810,7 +866,7 @@ mod tests {
         store_export(&db, &rolled).unwrap();
 
         let detail = UsageExport {
-            device: device("dev-a"),
+            snapshot_version: 0, device: device("dev-a"),
             shared_app_types: None,
             events: vec![event("r1", ts, 100)],
             daily: vec![],
@@ -831,7 +887,7 @@ mod tests {
         store_export(
             &db,
             &UsageExport {
-                device: device("dev-a"),
+                snapshot_version: 0, device: device("dev-a"),
                 shared_app_types: None,
                 events: vec![event("a1", ts, 100)],
                 daily: vec![],
@@ -841,7 +897,7 @@ mod tests {
         store_export(
             &db,
             &UsageExport {
-                device: device("dev-b"),
+                snapshot_version: 0, device: device("dev-b"),
                 shared_app_types: None,
                 events: vec![event("b1", ts, 300)],
                 daily: vec![],
@@ -865,7 +921,7 @@ mod tests {
         store_export(
             &db,
             &UsageExport {
-                device: device("dev-a"),
+                snapshot_version: 0, device: device("dev-a"),
                 shared_app_types: None,
                 events: vec![event("a1", ts, 100)],
                 daily: vec![],
@@ -884,7 +940,7 @@ mod tests {
         store_export(
             &db,
             &UsageExport {
-                device: device("dev-a"),
+                snapshot_version: 0, device: device("dev-a"),
                 shared_app_types: None,
                 events: vec![],
                 daily: vec![daily("2024-05-01", 3, 30), daily("2024-05-02", 4, 40)],
@@ -922,7 +978,7 @@ mod tests {
         seed_local_usage(&db);
         let all = export_local_usage(&db).unwrap();
         assert_eq!(all.events.len(), super::super::SHARED_APP_TYPES.len());
-        assert_eq!(all.daily.len(), super::super::SHARED_APP_TYPES.len());
+        assert_eq!(all.daily.len(), super::super::SHARED_APP_TYPES.len() * 2);
         let mut settings = super::super::identity::share_settings(&db);
         settings.shared_app_types = vec!["mcode".into()];
         super::super::identity::save_share_settings(&db, &settings).unwrap();
@@ -930,13 +986,13 @@ mod tests {
         assert_eq!(selected.shared_app_types, Some(vec!["mcode".into()]));
         assert_eq!(selected.events.len(), 1);
         assert_eq!(selected.events[0].app_type, "mcode");
-        assert_eq!(selected.daily.len(), 1);
+        assert_eq!(selected.daily.len(), 2);
         assert_eq!(selected.daily[0].app_type, "mcode");
-        assert_eq!(selected.daily[0].request_count, 4);
-        assert_eq!(selected.daily[0].input_tokens, 400);
+        assert_eq!(selected.daily.iter().map(|r| r.request_count).sum::<i64>(), 4);
+        assert_eq!(selected.daily.iter().map(|r| r.input_tokens).sum::<i64>(), 400);
         assert_eq!(selected.daily[0].input_token_semantics, 2);
         assert_eq!(
-            selected.daily[0].total_cost_usd.parse::<f64>().unwrap(),
+            selected.daily.iter().map(|r| r.total_cost_usd.parse::<f64>().unwrap()).sum::<f64>(),
             2.5
         );
         settings.shared_app_types.clear();
@@ -965,7 +1021,7 @@ mod tests {
         zcode.app_type = "zcode".into();
         zcode.data_source = "zcode_session".into();
         let mut export = UsageExport {
-            device: device("a"),
+            snapshot_version: 0, device: device("a"),
             shared_app_types: None,
             events: vec![event("dsh", ts, 20), zcode],
             daily: vec![daily("2024-05-01", 3, 30)],
@@ -1005,7 +1061,7 @@ mod tests {
         let mut zcode = event("zcode", ts, 10);
         zcode.app_type = "zcode".into();
         let mut export = UsageExport {
-            device: device("a"),
+            snapshot_version: 0, device: device("a"),
             shared_app_types: None,
             events: vec![event("dsh", ts, 20), zcode.clone()],
             daily: vec![],
