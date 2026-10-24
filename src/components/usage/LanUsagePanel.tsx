@@ -182,7 +182,10 @@ export function LanUsagePanel({ range }: LanUsagePanelProps) {
         toast.success(t("usage.lan.syncDone", { count: imported }));
       } else {
         toast.warning(
-          t("usage.lan.syncPartial", { count: imported, failed: failed.length }),
+          t("usage.lan.syncPartial", {
+            count: imported,
+            failed: failed.length,
+          }),
         );
       }
     } catch (error) {
@@ -264,10 +267,7 @@ export function LanUsagePanel({ range }: LanUsagePanelProps) {
               locale={locale}
               emphasis
               detail={t("usage.lan.tileDetail", {
-                requests: fmtInt(
-                  overview?.combined.totalRequests ?? 0,
-                  locale,
-                ),
+                requests: fmtInt(overview?.combined.totalRequests ?? 0, locale),
                 cost: money(overview?.combined.totalCost, 2),
               })}
             />

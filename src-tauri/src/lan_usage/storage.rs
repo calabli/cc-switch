@@ -120,7 +120,7 @@ pub fn set_device_enabled(db: &Database, device_id: &str, enabled: bool) -> Resu
 pub fn record_sync_result(
     db: &Database,
     device_id: &str,
-    imported: i64,
+    _imported: i64,
     error: Option<&str>,
 ) -> Result<(), AppError> {
     let conn = lock_conn!(db.conn);

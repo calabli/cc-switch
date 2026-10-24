@@ -15,9 +15,7 @@ export const lanUsageApi = {
     invoke("get_lan_share_settings"),
 
   /** 保存共享设置，并按新设置启停服务 */
-  saveSettings: async (
-    settings: LanShareSettings,
-  ): Promise<LanShareSettings> =>
+  saveSettings: async (settings: LanShareSettings): Promise<LanShareSettings> =>
     invoke("save_lan_share_settings", { settings }),
 
   /** 本机在局域网里的身份 */
@@ -42,7 +40,10 @@ export const lanUsageApi = {
     invoke("connect_lan_device", { deviceId, deviceName, host, port }),
 
   /** 手动按地址连接（广播被挡时用） */
-  connectByHost: async (host: string, port?: number): Promise<LanDeviceStatus> =>
+  connectByHost: async (
+    host: string,
+    port?: number,
+  ): Promise<LanDeviceStatus> =>
     invoke("connect_lan_device_by_host", { host, port }),
 
   /** 断开一台设备 */

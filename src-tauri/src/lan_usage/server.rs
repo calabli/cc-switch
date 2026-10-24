@@ -34,7 +34,7 @@ struct ServerState {
 ///
 /// 端口被占用时返回错误（上层会记日志并提示用户改端口）。
 pub async fn start(db: Arc<Database>, port: u16) -> Result<LanServerHandle, AppError> {
-    let state = Arc::new(ServerState { db });
+    let state = Arc::new(ServerState { db: db.clone() });
     let app = Router::new()
         .route("/api/lan/info", get(info_handler))
         .route("/api/lan/usage", get(usage_handler))
@@ -59,7 +59,7 @@ pub async fn start(db: Arc<Database>, port: u16) -> Result<LanServerHandle, AppE
     });
 
     let udp_stop = stop_tx.subscribe();
-    let udp_db = db.clone();
+    let udp_db = db;
     let udp_task = tokio::spawn(async move {
         if let Err(e) = run_discovery_responder(udp_db, bound_port, udp_stop).await {
             log::warn!("局域网发现应答服务退出: {e}");
