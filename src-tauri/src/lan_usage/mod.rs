@@ -147,12 +147,6 @@ pub const SHARED_DATA_SOURCES: [&str; 2] = ["dsh_session", "zcode_session"];
 /// 上述来源对应的 app_type，用于在按天汇总表里取同样的范围。
 pub const SHARED_APP_TYPES: [&str; 2] = ["dsh", "zcode"];
 
-/// 明细行保留天数，和本机 `rollup_and_prune(30)` 保持一致。
-///
-/// 超过这个天数的明细行会被收进按天汇总表；对端只共享「还在明细里」的行，
-/// 更早的历史通过按天汇总行共享，两者不会重复计入。
-pub const DETAIL_RETAIN_DAYS: i64 = 30;
-
 /// 本机身份信息。局域网里用它区分「谁是谁」。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
