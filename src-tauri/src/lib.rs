@@ -2418,6 +2418,49 @@ fn relaunch_macos_bundle(env: &tauri::Env) {
     }
 }
 
+/// 当前运行的 `.app` bundle 路径（`<Name>.app`）。
+///
+/// 可执行文件在 bundle 里的位置是 `<Name>.app/Contents/MacOS/<binary>`，
+/// 所以从 `current_exe()` 上溯三层就是 bundle 本身。
+#[cfg(target_os = "macos")]
+fn macos_bundle_path() -> Option<std::path::PathBuf> {
+    let binary = std::env::current_exe().ok()?;
+    binary
+        .ancestors()
+        .nth(3)
+        .filter(|p| p.extension().is_some_and(|ext| ext == "app"))
+        .map(|p| p.to_path_buf())
+}
+
+/// macOS：清掉 app bundle 上的隔离标记（`com.apple.quarantine`）。
+///
+/// 浏览器下载的 app 会带这个标记，Gatekeeper 第一次打开会拦一下（提示"无法验证是否
+/// 包含可能危害 Mac 安全性"）。macOS 还会把隔离标记继承给「由被隔离进程写出的文件」，
+/// 所以应用内更新替换完 bundle 之后，新文件又会带上标记 —— 重启时再被拦一次。
+/// Tauri 的 updater 不碰这个属性，所以这里在重启前主动清掉，让用户只需要处理第一次。
+///
+/// 清不掉不是致命错误：app 装在只读位置、或从 App Translocation 路径运行时都会失败，
+/// 这时保持原样，用户仍可以手动 `xattr -dr`。
+#[cfg(target_os = "macos")]
+pub fn strip_macos_quarantine() {
+    let Some(bundle) = macos_bundle_path() else {
+        log::warn!("找不到当前 app bundle，跳过清除隔离标记");
+        return;
+    };
+    let status = std::process::Command::new("/usr/bin/xattr")
+        .arg("-dr")
+        .arg("com.apple.quarantine")
+        .arg(&bundle)
+        .status();
+    match status {
+        Ok(s) if s.success() => {
+            log::info!("已清除 app bundle 的隔离标记: {}", bundle.display())
+        }
+        Ok(s) => log::warn!("清除隔离标记失败（{s}）: {}", bundle.display()),
+        Err(e) => log::warn!("清除隔离标记失败（{e}）: {}", bundle.display()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

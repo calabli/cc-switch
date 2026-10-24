@@ -343,6 +343,12 @@ pub async fn install_update_and_restart(app: AppHandle) -> Result<bool, String> 
             .install(bytes)
             .map_err(|e| format!("安装更新失败: {e}"))?;
 
+        // macOS：更新替换完 bundle 之后，新写的文件会继承旧进程的隔离标记，
+        // 重启时 Gatekeeper 会再拦一次（"无法验证是否包含可能危害 Mac 安全性"）。
+        // Tauri 的 updater 不处理 quarantine，这里在重启前清掉。
+        #[cfg(target_os = "macos")]
+        crate::strip_macos_quarantine();
+
         crate::save_window_state_before_exit(&app);
         crate::cleanup_before_exit(&app).await;
 
