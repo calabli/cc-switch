@@ -21,6 +21,7 @@ mod gemini_mcp;
 mod grok_config;
 pub mod hermes_config;
 mod init_status;
+mod lan_usage;
 mod jsonc_document;
 mod kimi_config;
 mod kimi_session;
@@ -730,6 +731,9 @@ pub fn run() {
 
             // 设置 AppHandle 用于代理故障转移时的 UI 更新
             app_state.proxy_service.set_app_handle(app.handle().clone());
+
+            // 局域网用量聚合：按用户设置启动共享服务与定时同步（默认关闭）
+            crate::lan_usage::start_background(app_state.db.clone());
 
             // 补完上次崩溃时写到一半的客户端文件（写前意图在 ~/.cc-switch/live-state.json），
             // 要在任何写客户端文件的启动步骤之前。
@@ -1785,6 +1789,17 @@ pub fn run() {
             commands::rebuild_codex_usage,
             commands::get_session_usage_last_sync,
             commands::get_usage_data_sources,
+            commands::get_lan_share_settings,
+            commands::save_lan_share_settings,
+            commands::get_lan_device_info,
+            commands::discover_lan_devices,
+            commands::list_lan_devices,
+            commands::connect_lan_device,
+            commands::disconnect_lan_device,
+            commands::set_lan_device_enabled,
+            commands::sync_lan_devices,
+            commands::get_lan_usage_overview,
+            commands::get_lan_daily_totals,
             // Stream health check
             commands::stream_check_provider,
             // Session manager
@@ -2026,6 +2041,7 @@ pub fn run() {
 /// 把接上代理的客户端都指回直连（模式和代理路由保留，下次启动再接上），再停止代理。
 /// 客户端不能一直指着代理：开机自启默认关闭，CC Switch 一关客户端就连不上了。
 pub async fn cleanup_before_exit(app_handle: &tauri::AppHandle) {
+    crate::lan_usage::stop_server();
     if let Some(state) = app_handle.try_state::<store::AppState>() {
         crate::mode::controller::detach_all(state.inner()).await;
         log::info!("退出清理完成：客户端已指回直连，代理已停止");

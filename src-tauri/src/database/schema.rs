@@ -358,6 +358,9 @@ impl Database {
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
 
+        // 20. 局域网用量聚合用的三张表（lan_devices / lan_usage_events / lan_usage_daily）
+        Self::create_lan_usage_tables(conn)?;
+
         // 修复跑过未发布开发版的库：current 标记曾是全局 key，现按应用分组
         // （随 v12 定稿为 current_profile_id_<scope>，不单独 bump 版本）
         if conn
@@ -606,6 +609,11 @@ impl Database {
                             }
                         }
                         Self::set_user_version(conn, 22)?;
+                    }
+                    22 => {
+                        log::info!("迁移数据库从 v22 到 v23（局域网用量聚合表）");
+                        Self::create_lan_usage_tables(conn)?;
+                        Self::set_user_version(conn, 23)?;
                     }
                     _ => {
                         return Err(AppError::Database(format!(
@@ -1643,6 +1651,101 @@ impl Database {
     /// 后继续增量；之后写入字节偏移走 seek 增量，并记录游标边界前的
     /// 尾部指纹用于识别外部重写（截断由 size 检测，同尺寸/更大的替换
     /// 只有指纹能发现）。
+    /// 局域网用量聚合用的三张表。
+    ///
+    /// - `lan_devices`      登记过的对端设备（地址、同步状态）
+    /// - `lan_usage_events` 从对端拉回来的请求级明细，按设备维度存
+    /// - `lan_usage_daily`  对端已经收进按天汇总表的历史，按设备+日期存
+    ///
+    /// 明细与按天汇总互斥：同一台设备的同一天只会有其中一种粒度，
+    /// 所以聚合时直接相加不会重复计数。
+    fn create_lan_usage_tables(conn: &Connection) -> Result<(), AppError> {
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS lan_devices (
+                device_id TEXT PRIMARY KEY,
+                device_name TEXT NOT NULL DEFAULT '',
+                host TEXT NOT NULL DEFAULT '',
+                port INTEGER NOT NULL DEFAULT 17890,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                auto_sync INTEGER NOT NULL DEFAULT 1,
+                last_seen_at INTEGER,
+                last_sync_at INTEGER,
+                last_error TEXT,
+                created_at INTEGER NOT NULL DEFAULT 0
+            )",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS lan_usage_events (
+                device_id TEXT NOT NULL,
+                request_id TEXT NOT NULL,
+                data_source TEXT NOT NULL DEFAULT '',
+                app_type TEXT NOT NULL DEFAULT '',
+                model TEXT NOT NULL DEFAULT '',
+                session_id TEXT,
+                input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+                input_token_semantics INTEGER NOT NULL DEFAULT 0,
+                input_cost_usd TEXT NOT NULL DEFAULT '0',
+                output_cost_usd TEXT NOT NULL DEFAULT '0',
+                cache_read_cost_usd TEXT NOT NULL DEFAULT '0',
+                cache_creation_cost_usd TEXT NOT NULL DEFAULT '0',
+                total_cost_usd TEXT NOT NULL DEFAULT '0',
+                status_code INTEGER NOT NULL DEFAULT 0,
+                latency_ms INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT 0,
+                synced_at INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (device_id, request_id)
+            )",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lan_usage_events_device_time
+             ON lan_usage_events(device_id, created_at)",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lan_usage_events_time
+             ON lan_usage_events(created_at)",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS lan_usage_daily (
+                device_id TEXT NOT NULL,
+                date TEXT NOT NULL,
+                app_type TEXT NOT NULL DEFAULT '',
+                model TEXT NOT NULL DEFAULT '',
+                request_count INTEGER NOT NULL DEFAULT 0,
+                success_count INTEGER NOT NULL DEFAULT 0,
+                input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+                input_token_semantics INTEGER NOT NULL DEFAULT 0,
+                total_cost_usd TEXT NOT NULL DEFAULT '0',
+                avg_latency_ms INTEGER NOT NULL DEFAULT 0,
+                synced_at INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (device_id, date, app_type, model)
+            )",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lan_usage_daily_date
+             ON lan_usage_daily(date)",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
+        Ok(())
+    }
+
     fn migrate_v17_to_v18(conn: &Connection) -> Result<(), AppError> {
         // 缺表的库（异常/测试夹具）跳过：create_tables 会以含列的新 DDL 建表。
         if Self::table_exists(conn, "session_log_sync")? {

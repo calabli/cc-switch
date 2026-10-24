@@ -1,0 +1,147 @@
+name: DSH branch checks
+
+# 只为 codex/dsh-usage 分支跑检查：上游的 ci.yml 只在 main 上触发，
+# 我们这条分支没有反馈回路，编译错误要等打包 workflow 才暴露，太慢。
+#
+# 这里跑三件事：
+#   1. cargo fmt   —— 格式不对就地改好并回写分支，省掉来回改格式的往返
+#   2. cargo clippy —— 编译 + lint（-D warnings）
+#   3. cargo nextest —— 单元测试
+#
+# 前端另外跑 typecheck / format:check / 单测。
+on:
+  push:
+    branches: [codex/dsh-usage]
+  workflow_dispatch:
+
+concurrency:
+  group: dsh-check-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  backend:
+    name: Backend checks
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Read pinned Rust toolchain
+        id: rust-toolchain
+        shell: bash
+        run: |
+          channel=$(sed -nE 's/^channel *= *"([^"]+)".*/\1/p' rust-toolchain.toml)
+          test -n "$channel"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ steps.rust-toolchain.outputs.channel }}
+          components: rustfmt, clippy
+
+      - name: Install Linux system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev \
+            libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev \
+            || sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.0-dev
+          sudo apt-get install -y --no-install-recommends libsoup-3.0-dev \
+            || sudo apt-get install -y --no-install-recommends libsoup-2.5-dev
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: backend
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2.87.24
+        with:
+          tool: cargo-nextest
+
+      - name: Create frontend dist placeholder
+        shell: bash
+        run: mkdir -p dist
+
+      # 格式不对就地改好再回写分支：省掉「CI 报格式 → 手改 → 再推」的往返。
+      # 改完的内容由后面的 clippy / nextest 一起验证，不直接信任。
+      - name: Format Rust code
+        id: fmt
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --manifest-path src-tauri/Cargo.toml
+          if git diff --quiet -- src-tauri; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "格式本来就合规"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "::group::格式化改动"
+            git --no-pager diff --stat -- src-tauri
+            echo "::endgroup::"
+          fi
+
+      - name: Commit formatting fixes
+        if: steps.fmt.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src-tauri
+          git commit -m 'style: rustfmt'
+          git push origin HEAD:${{ github.ref_name }}
+
+      - name: Clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+
+      - name: Run tests
+        run: cargo nextest run --manifest-path src-tauri/Cargo.toml --profile ci
+
+  frontend:
+    name: Frontend checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm
+        shell: bash
+        run: |
+          corepack enable
+          corepack install
+          pnpm --version
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v5
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: TypeScript type check
+        run: pnpm typecheck
+
+      - name: Check formatting
+        run: pnpm format:check
+
+      - name: Unit tests
+        run: pnpm test:unit

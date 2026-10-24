@@ -68,6 +68,7 @@ import { resolveRequestLogColumns } from "./requestLogColumns";
 import type { UsageDisplaySettings } from "@/types";
 import { UsageDateRangePicker } from "./UsageDateRangePicker";
 import { UsageHeatmap } from "./UsageHeatmap";
+import { LanUsagePanel } from "./LanUsagePanel";
 import {
   LOG_PAGE_SIZES,
   type LogPageSize,
@@ -920,8 +921,11 @@ export function UsageDashboard({
   );
 
   const body = isEmpty ? (
-    <div className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto scroll-stable px-6 pb-6">
-      <div className="mt-16 flex max-w-[440px] flex-col items-center gap-3 text-center">
+    <div className="flex min-h-0 flex-1 flex-col items-center gap-6 overflow-y-auto scroll-stable px-6 pb-6">
+      <div className="w-full">
+        <LanUsagePanel range={range} />
+      </div>
+      <div className="mt-10 flex max-w-[440px] flex-col items-center gap-3 text-center">
         <span
           aria-hidden="true"
           className="flex h-11 w-11 items-center justify-center rounded-full bg-subtle text-fg-2"
@@ -957,6 +961,7 @@ export function UsageDashboard({
       id="main-content"
       className="flex min-h-0 flex-1 flex-col gap-8 overflow-y-auto scroll-stable px-6 pb-6 pt-1"
     >
+      <LanUsagePanel range={range} />
       {overviewPanel}
       {detailPanel}
     </div>
