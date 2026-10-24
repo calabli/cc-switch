@@ -481,7 +481,9 @@ fn push_provider_model_filters(
 /// The projection reserves `lan@<hex device id>|` as an origin namespace.
 /// Native IDs keep the empty origin; copies from different devices cannot deduplicate each other.
 fn same_usage_origin_sql(left: &str, right: &str) -> String {
-    let origin = |alias: &str| format!("CASE WHEN substr({alias}.request_id, 1, 4) = 'lan@' THEN substr({alias}.request_id, 1, instr({alias}.request_id, '|')) ELSE '' END");
+    let origin = |alias: &str| {
+        format!("CASE WHEN substr({alias}.request_id, 1, 4) = 'lan@' THEN substr({alias}.request_id, 1, instr({alias}.request_id, '|')) ELSE '' END")
+    };
     format!("({}) = ({})", origin(left), origin(right))
 }
 

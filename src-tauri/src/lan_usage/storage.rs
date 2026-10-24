@@ -1,8 +1,8 @@
 //! 局域网用量的本地存储：登记设备、存对端拉回来的用量行、按设备聚合。
 
 use super::{
-    DailyRollupRow, LanDailyTotal, LanDeviceStatus, LanDeviceUsage, LanUsageSummary, UsageEventRow, UsageMetadata,
-    UsageExport,
+    DailyRollupRow, LanDailyTotal, LanDeviceStatus, LanDeviceUsage, LanUsageSummary, UsageEventRow,
+    UsageExport, UsageMetadata,
 };
 use crate::database::{lock_conn, Database};
 use crate::error::AppError;
@@ -97,8 +97,11 @@ pub fn remove_device(db: &Database, device_id: &str) -> Result<(), AppError> {
         params![device_id],
     )
     .map_err(|e| AppError::Database(e.to_string()))?;
-    conn.execute("DELETE FROM lan_usage_snapshots WHERE device_id = ?1", params![device_id])
-        .map_err(|e| AppError::Database(e.to_string()))?;
+    conn.execute(
+        "DELETE FROM lan_usage_snapshots WHERE device_id = ?1",
+        params![device_id],
+    )
+    .map_err(|e| AppError::Database(e.to_string()))?;
     conn.execute(
         "DELETE FROM lan_devices WHERE device_id = ?1",
         params![device_id],
@@ -152,23 +155,41 @@ pub fn store_export(db: &Database, export: &UsageExport) -> Result<usize, AppErr
         sanitized.daily.retain(|row| apps.contains(&row.app_type));
         sanitized.shared_app_types = Some(apps);
     }
-    let payload = serde_json::to_string(&sanitized).map_err(|e| AppError::Message(e.to_string()))?;
+    let payload =
+        serde_json::to_string(&sanitized).map_err(|e| AppError::Message(e.to_string()))?;
     // Legacy status panels have fewer dimensions. Collapse their copy only;
     // the canonical snapshot above retains provider and pricing dimensions.
     let mut daily = std::collections::BTreeMap::new();
     for row in std::mem::take(&mut sanitized.daily) {
         let key = (row.date.clone(), row.app_type.clone(), row.model.clone());
-        daily.entry(key).and_modify(|total: &mut DailyRollupRow| {
-            let requests = total.request_count.saturating_add(row.request_count);
-            total.avg_latency_ms = if requests > 0 { (total.avg_latency_ms.saturating_mul(total.request_count).saturating_add(row.avg_latency_ms.saturating_mul(row.request_count))) / requests } else { 0 };
-            total.request_count = requests;
-            total.success_count = total.success_count.saturating_add(row.success_count);
-            total.input_tokens = total.input_tokens.saturating_add(row.input_tokens);
-            total.output_tokens = total.output_tokens.saturating_add(row.output_tokens);
-            total.cache_read_tokens = total.cache_read_tokens.saturating_add(row.cache_read_tokens);
-            total.cache_creation_tokens = total.cache_creation_tokens.saturating_add(row.cache_creation_tokens);
-            total.total_cost_usd = (total.total_cost_usd.parse::<f64>().unwrap_or(0.0) + row.total_cost_usd.parse::<f64>().unwrap_or(0.0)).to_string();
-        }).or_insert(row);
+        daily
+            .entry(key)
+            .and_modify(|total: &mut DailyRollupRow| {
+                let requests = total.request_count.saturating_add(row.request_count);
+                total.avg_latency_ms = if requests > 0 {
+                    (total
+                        .avg_latency_ms
+                        .saturating_mul(total.request_count)
+                        .saturating_add(row.avg_latency_ms.saturating_mul(row.request_count)))
+                        / requests
+                } else {
+                    0
+                };
+                total.request_count = requests;
+                total.success_count = total.success_count.saturating_add(row.success_count);
+                total.input_tokens = total.input_tokens.saturating_add(row.input_tokens);
+                total.output_tokens = total.output_tokens.saturating_add(row.output_tokens);
+                total.cache_read_tokens = total
+                    .cache_read_tokens
+                    .saturating_add(row.cache_read_tokens);
+                total.cache_creation_tokens = total
+                    .cache_creation_tokens
+                    .saturating_add(row.cache_creation_tokens);
+                total.total_cost_usd = (total.total_cost_usd.parse::<f64>().unwrap_or(0.0)
+                    + row.total_cost_usd.parse::<f64>().unwrap_or(0.0))
+                .to_string();
+            })
+            .or_insert(row);
     }
     sanitized.daily = daily.into_values().collect();
     let export = &sanitized;
@@ -177,12 +198,23 @@ pub fn store_export(db: &Database, export: &UsageExport) -> Result<usize, AppErr
     let tx = conn
         .transaction()
         .map_err(|e| AppError::Database(e.to_string()))?;
-    tx.execute("INSERT INTO lan_usage_snapshots (device_id, payload) VALUES (?1, ?2)
-        ON CONFLICT(device_id) DO UPDATE SET payload = excluded.payload", params![device_id, payload])
-        .map_err(|e| AppError::Database(e.to_string()))?;
+    tx.execute(
+        "INSERT INTO lan_usage_snapshots (device_id, payload) VALUES (?1, ?2)
+        ON CONFLICT(device_id) DO UPDATE SET payload = excluded.payload",
+        params![device_id, payload],
+    )
+    .map_err(|e| AppError::Database(e.to_string()))?;
     if export.snapshot_version >= 2 {
-        tx.execute("DELETE FROM lan_usage_events WHERE device_id = ?1", [device_id]).map_err(|e| AppError::Database(e.to_string()))?;
-        tx.execute("DELETE FROM lan_usage_daily WHERE device_id = ?1", [device_id]).map_err(|e| AppError::Database(e.to_string()))?;
+        tx.execute(
+            "DELETE FROM lan_usage_events WHERE device_id = ?1",
+            [device_id],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        tx.execute(
+            "DELETE FROM lan_usage_daily WHERE device_id = ?1",
+            [device_id],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
     }
     let now = chrono::Utc::now().timestamp();
     let mut written = 0usize;
@@ -383,8 +415,14 @@ pub fn export_local_usage(db: &Database) -> Result<UsageExport, AppError> {
             .query_map([], |row| {
                 Ok(UsageEventRow {
                     metadata: UsageMetadata {
-                        provider_id: row.get(18)?, provider_name: row.get(19)?, request_model: row.get(20)?,
-                        pricing_model: row.get(21)?, first_token_ms: row.get(22)?, duration_ms: row.get(23)?, is_streaming: row.get(24)?, cost_multiplier: row.get(25)?,
+                        provider_id: row.get(18)?,
+                        provider_name: row.get(19)?,
+                        request_model: row.get(20)?,
+                        pricing_model: row.get(21)?,
+                        first_token_ms: row.get(22)?,
+                        duration_ms: row.get(23)?,
+                        is_streaming: row.get(24)?,
+                        cost_multiplier: row.get(25)?,
                     },
                     request_id: row.get(0)?,
                     data_source: row.get(1)?,
@@ -432,7 +470,10 @@ pub fn export_local_usage(db: &Database) -> Result<UsageExport, AppError> {
             .query_map([], |row| {
                 Ok(DailyRollupRow {
                     metadata: UsageMetadata {
-                        provider_id: row.get(12)?, provider_name: row.get(13)?, request_model: row.get(14)?, pricing_model: row.get(15)?,
+                        provider_id: row.get(12)?,
+                        provider_name: row.get(13)?,
+                        request_model: row.get(14)?,
+                        pricing_model: row.get(15)?,
                         ..Default::default()
                     },
                     date: row.get(0)?,
@@ -800,7 +841,8 @@ mod tests {
         register_device(&db, "dev-a", "A", "10.0.0.2", 17890).unwrap();
         let ts = ts_for("2024-05-01");
         let export = UsageExport {
-            snapshot_version: 0, device: device("dev-a"),
+            snapshot_version: 0,
+            device: device("dev-a"),
             shared_app_types: None,
             events: vec![event("r1", ts, 100), event("r2", ts + 60, 200)],
             daily: vec![],
@@ -823,7 +865,8 @@ mod tests {
         let ts = ts_for("2024-05-01");
 
         let detail = UsageExport {
-            snapshot_version: 0, device: device("dev-a"),
+            snapshot_version: 0,
+            device: device("dev-a"),
             shared_app_types: None,
             events: vec![event("r1", ts, 100), event("r2", ts + 60, 200)],
             daily: vec![],
@@ -837,7 +880,8 @@ mod tests {
         );
 
         let rolled = UsageExport {
-            snapshot_version: 0, device: device("dev-a"),
+            snapshot_version: 0,
+            device: device("dev-a"),
             shared_app_types: None,
             events: vec![],
             daily: vec![daily("2024-05-01", 7, 999)],
@@ -858,7 +902,8 @@ mod tests {
         let ts = ts_for("2024-05-01");
 
         let rolled = UsageExport {
-            snapshot_version: 0, device: device("dev-a"),
+            snapshot_version: 0,
+            device: device("dev-a"),
             shared_app_types: None,
             events: vec![],
             daily: vec![daily("2024-05-01", 7, 999)],
@@ -866,7 +911,8 @@ mod tests {
         store_export(&db, &rolled).unwrap();
 
         let detail = UsageExport {
-            snapshot_version: 0, device: device("dev-a"),
+            snapshot_version: 0,
+            device: device("dev-a"),
             shared_app_types: None,
             events: vec![event("r1", ts, 100)],
             daily: vec![],
@@ -887,7 +933,8 @@ mod tests {
         store_export(
             &db,
             &UsageExport {
-                snapshot_version: 0, device: device("dev-a"),
+                snapshot_version: 0,
+                device: device("dev-a"),
                 shared_app_types: None,
                 events: vec![event("a1", ts, 100)],
                 daily: vec![],
@@ -897,7 +944,8 @@ mod tests {
         store_export(
             &db,
             &UsageExport {
-                snapshot_version: 0, device: device("dev-b"),
+                snapshot_version: 0,
+                device: device("dev-b"),
                 shared_app_types: None,
                 events: vec![event("b1", ts, 300)],
                 daily: vec![],
@@ -921,7 +969,8 @@ mod tests {
         store_export(
             &db,
             &UsageExport {
-                snapshot_version: 0, device: device("dev-a"),
+                snapshot_version: 0,
+                device: device("dev-a"),
                 shared_app_types: None,
                 events: vec![event("a1", ts, 100)],
                 daily: vec![],
@@ -940,7 +989,8 @@ mod tests {
         store_export(
             &db,
             &UsageExport {
-                snapshot_version: 0, device: device("dev-a"),
+                snapshot_version: 0,
+                device: device("dev-a"),
                 shared_app_types: None,
                 events: vec![],
                 daily: vec![daily("2024-05-01", 3, 30), daily("2024-05-02", 4, 40)],
@@ -988,11 +1038,21 @@ mod tests {
         assert_eq!(selected.events[0].app_type, "mcode");
         assert_eq!(selected.daily.len(), 2);
         assert_eq!(selected.daily[0].app_type, "mcode");
-        assert_eq!(selected.daily.iter().map(|r| r.request_count).sum::<i64>(), 4);
-        assert_eq!(selected.daily.iter().map(|r| r.input_tokens).sum::<i64>(), 400);
+        assert_eq!(
+            selected.daily.iter().map(|r| r.request_count).sum::<i64>(),
+            4
+        );
+        assert_eq!(
+            selected.daily.iter().map(|r| r.input_tokens).sum::<i64>(),
+            400
+        );
         assert_eq!(selected.daily[0].input_token_semantics, 2);
         assert_eq!(
-            selected.daily.iter().map(|r| r.total_cost_usd.parse::<f64>().unwrap()).sum::<f64>(),
+            selected
+                .daily
+                .iter()
+                .map(|r| r.total_cost_usd.parse::<f64>().unwrap())
+                .sum::<f64>(),
             2.5
         );
         settings.shared_app_types.clear();
@@ -1021,7 +1081,8 @@ mod tests {
         zcode.app_type = "zcode".into();
         zcode.data_source = "zcode_session".into();
         let mut export = UsageExport {
-            snapshot_version: 0, device: device("a"),
+            snapshot_version: 0,
+            device: device("a"),
             shared_app_types: None,
             events: vec![event("dsh", ts, 20), zcode],
             daily: vec![daily("2024-05-01", 3, 30)],
@@ -1061,7 +1122,8 @@ mod tests {
         let mut zcode = event("zcode", ts, 10);
         zcode.app_type = "zcode".into();
         let mut export = UsageExport {
-            snapshot_version: 0, device: device("a"),
+            snapshot_version: 0,
+            device: device("a"),
             shared_app_types: None,
             events: vec![event("dsh", ts, 20), zcode.clone()],
             daily: vec![],

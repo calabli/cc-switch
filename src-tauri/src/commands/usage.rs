@@ -20,15 +20,24 @@ where
 }
 
 /// Reuse every native statistic/filter on an isolated combined projection.
-async fn run_usage_query<T, F>(state: &State<'_, AppState>, multi_device: Option<bool>, query: F) -> Result<T, AppError>
-where T: Send + 'static, F: FnOnce(&crate::database::Database) -> Result<T, AppError> + Send + 'static,
+async fn run_usage_query<T, F>(
+    state: &State<'_, AppState>,
+    multi_device: Option<bool>,
+    query: F,
+) -> Result<T, AppError>
+where
+    T: Send + 'static,
+    F: FnOnce(&crate::database::Database) -> Result<T, AppError> + Send + 'static,
 {
     run_db_query(state, move |db| {
         if multi_device.unwrap_or(false) {
             let projection = crate::lan_usage::projection::database(db)?;
             query(&projection)
-        } else { query(db) }
-    }).await
+        } else {
+            query(db)
+        }
+    })
+    .await
 }
 
 /// 获取使用量汇总
@@ -198,7 +207,10 @@ pub async fn get_request_detail(
     multi_device: Option<bool>,
     request_id: String,
 ) -> Result<Option<RequestLogDetail>, AppError> {
-    run_usage_query(&state, multi_device, move |db| db.get_request_detail(&request_id)).await
+    run_usage_query(&state, multi_device, move |db| {
+        db.get_request_detail(&request_id)
+    })
+    .await
 }
 
 /// 获取模型定价列表
