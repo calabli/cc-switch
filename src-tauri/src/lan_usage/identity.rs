@@ -170,14 +170,18 @@ mod tests {
     fn shared_sources_default_to_all_and_support_empty_selection() {
         let db = Database::memory().unwrap();
         let mut settings = share_settings(&db);
-        assert_eq!(settings.shared_app_types, super::super::default_shared_app_types());
+        assert_eq!(
+            settings.shared_app_types,
+            super::super::default_shared_app_types()
+        );
         settings.shared_app_types = vec!["mcode".into(), "unknown".into(), "mcode".into()];
         save_share_settings(&db, &settings).unwrap();
         assert_eq!(share_settings(&db).shared_app_types, vec!["mcode"]);
         settings.shared_app_types.clear();
         save_share_settings(&db, &settings).unwrap();
         assert!(share_settings(&db).shared_app_types.is_empty());
-        db.set_setting(SETTING_SHARED_APP_TYPES, "invalid json").unwrap();
+        db.set_setting(SETTING_SHARED_APP_TYPES, "invalid json")
+            .unwrap();
         assert!(share_settings(&db).shared_app_types.is_empty());
     }
 
@@ -186,8 +190,11 @@ mod tests {
         let settings: LanShareSettings = serde_json::from_value(serde_json::json!({
             "enabled": false, "port": 17890, "deviceName": "old",
             "autoSync": true, "autoSyncIntervalSecs": 300
-        })).unwrap();
-        assert_eq!(settings.shared_app_types, super::super::default_shared_app_types());
+        }))
+        .unwrap();
+        assert_eq!(
+            settings.shared_app_types,
+            super::super::default_shared_app_types()
+        );
     }
-
 }

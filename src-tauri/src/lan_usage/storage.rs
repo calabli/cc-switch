@@ -153,7 +153,10 @@ pub fn store_export(db: &Database, export: &UsageExport) -> Result<usize, AppErr
 
     // A source deselected by the peer must disappear from both imported tables.
     // Older peers omit the scope, so their existing history remains compatible.
-    let selected = export.shared_app_types.as_ref().map(|apps| super::normalize_shared_app_types(apps));
+    let selected = export
+        .shared_app_types
+        .as_ref()
+        .map(|apps| super::normalize_shared_app_types(apps));
     if let Some(apps) = &selected {
         let names: Vec<&str> = apps.iter().map(String::as_str).collect();
         let scope = super::sql_in_list(&names);
@@ -170,7 +173,10 @@ pub fn store_export(db: &Database, export: &UsageExport) -> Result<usize, AppErr
 
     // 按天汇总行
     for row in &export.daily {
-        if selected.as_ref().is_some_and(|apps| !apps.contains(&row.app_type)) {
+        if selected
+            .as_ref()
+            .is_some_and(|apps| !apps.contains(&row.app_type))
+        {
             continue;
         }
         // 该设备该天的明细行作废（对端已经把它收进汇总表了）
@@ -220,7 +226,10 @@ pub fn store_export(db: &Database, export: &UsageExport) -> Result<usize, AppErr
 
     // 明细行
     for row in &export.events {
-        if selected.as_ref().is_some_and(|apps| !apps.contains(&row.app_type)) {
+        if selected
+            .as_ref()
+            .is_some_and(|apps| !apps.contains(&row.app_type))
+        {
             continue;
         }
         let date = super::local_date_string(row.created_at);
@@ -293,9 +302,7 @@ pub fn store_export(db: &Database, export: &UsageExport) -> Result<usize, AppErr
 /// 明细取 `proxy_request_logs` 中勾选应用的行；已经被收进按天汇总表的历史
 /// 从 `usage_daily_rollups` 取，并且跳过那些已经出现在汇总表里的日期，避免同一
 /// 天被算两遍。
-pub fn export_local_usage(
-    db: &Database,
-) -> Result<UsageExport, AppError> {
+pub fn export_local_usage(db: &Database) -> Result<UsageExport, AppError> {
     let settings = super::identity::share_settings(db);
     let device = super::identity::device_info(db)?;
     let selected = super::normalize_shared_app_types(&settings.shared_app_types);
@@ -395,7 +402,12 @@ pub fn export_local_usage(
         }
     }
 
-    Ok(UsageExport { device, shared_app_types: Some(selected), events, daily })
+    Ok(UsageExport {
+        device,
+        shared_app_types: Some(selected),
+        events,
+        daily,
+    })
 }
 
 /// 把时间区间换算成按天汇总表用的本地日期区间。
@@ -923,7 +935,10 @@ mod tests {
         assert_eq!(selected.daily[0].request_count, 4);
         assert_eq!(selected.daily[0].input_tokens, 400);
         assert_eq!(selected.daily[0].input_token_semantics, 2);
-        assert_eq!(selected.daily[0].total_cost_usd.parse::<f64>().unwrap(), 2.5);
+        assert_eq!(
+            selected.daily[0].total_cost_usd.parse::<f64>().unwrap(),
+            2.5
+        );
         settings.shared_app_types.clear();
         super::super::identity::save_share_settings(&db, &settings).unwrap();
         let none = export_local_usage(&db).unwrap();
@@ -932,7 +947,11 @@ mod tests {
         assert!(none.daily.is_empty());
         // Selecting none changes exports, never deletes original local records.
         let conn = lock_conn!(db.conn);
-        let local: i64 = conn.query_row("SELECT COUNT(*) FROM proxy_request_logs", [], |row| row.get(0)).unwrap();
+        let local: i64 = conn
+            .query_row("SELECT COUNT(*) FROM proxy_request_logs", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
         assert_eq!(local as usize, super::super::SHARED_APP_TYPES.len());
     }
 
@@ -946,7 +965,8 @@ mod tests {
         zcode.app_type = "zcode".into();
         zcode.data_source = "zcode_session".into();
         let mut export = UsageExport {
-            device: device("a"), shared_app_types: None,
+            device: device("a"),
+            shared_app_types: None,
             events: vec![event("dsh", ts, 20), zcode],
             daily: vec![daily("2024-05-01", 3, 30)],
         };
@@ -957,12 +977,24 @@ mod tests {
         export.shared_app_types = Some(vec!["zcode".into()]);
         // Rows outside the declared selection are ignored even if present in the payload.
         store_export(&db, &export).unwrap();
-        assert_eq!(device_summary(&db, "a", None, None).unwrap().total_requests, 1);
-        assert_eq!(device_summary(&db, "b", None, None).unwrap().total_requests, 5);
+        assert_eq!(
+            device_summary(&db, "a", None, None).unwrap().total_requests,
+            1
+        );
+        assert_eq!(
+            device_summary(&db, "b", None, None).unwrap().total_requests,
+            5
+        );
         export.shared_app_types = Some(vec![]);
         store_export(&db, &export).unwrap();
-        assert_eq!(device_summary(&db, "a", None, None).unwrap().total_requests, 0);
-        assert_eq!(device_summary(&db, "b", None, None).unwrap().total_requests, 5);
+        assert_eq!(
+            device_summary(&db, "a", None, None).unwrap().total_requests,
+            0
+        );
+        assert_eq!(
+            device_summary(&db, "b", None, None).unwrap().total_requests,
+            5
+        );
     }
 
     #[test]
@@ -973,19 +1005,27 @@ mod tests {
         let mut zcode = event("zcode", ts, 10);
         zcode.app_type = "zcode".into();
         let mut export = UsageExport {
-            device: device("a"), shared_app_types: None,
-            events: vec![event("dsh", ts, 20), zcode.clone()], daily: vec![],
+            device: device("a"),
+            shared_app_types: None,
+            events: vec![event("dsh", ts, 20), zcode.clone()],
+            daily: vec![],
         };
         store_export(&db, &export).unwrap();
         export.events.clear();
         export.daily.push(daily("2024-05-01", 3, 30));
         store_export(&db, &export).unwrap();
-        assert_eq!(device_summary(&db, "a", None, None).unwrap().total_requests, 4);
+        assert_eq!(
+            device_summary(&db, "a", None, None).unwrap().total_requests,
+            4
+        );
         // A rollup for DSH must not suppress a new ZCode detail, either.
         zcode.request_id = "zcode-new".into();
         export.events.push(zcode);
         store_export(&db, &export).unwrap();
-        assert_eq!(device_summary(&db, "a", None, None).unwrap().total_requests, 5);
+        assert_eq!(
+            device_summary(&db, "a", None, None).unwrap().total_requests,
+            5
+        );
     }
 
     #[test]
@@ -994,5 +1034,4 @@ mod tests {
         let export: UsageExport = serde_json::from_value(value).unwrap();
         assert_eq!(export.shared_app_types, None);
     }
-
 }

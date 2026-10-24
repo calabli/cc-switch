@@ -128,11 +128,27 @@ pub const DISCOVERY_MAGIC: &str = "CC_SWITCH_LAN_DISCOVER_V1";
 
 /// All supported usage apps; sharing exports metrics, never request/response bodies.
 pub const SHARED_APP_TYPES: [&str; 14] = [
-    "claude", "claude-desktop", "codex", "gemini", "grokbuild", "opencode", "openclaw", "hermes", "pi", "mcode", "kimi", "agy", "dsh", "zcode"
+    "claude",
+    "claude-desktop",
+    "codex",
+    "gemini",
+    "grokbuild",
+    "opencode",
+    "openclaw",
+    "hermes",
+    "pi",
+    "mcode",
+    "kimi",
+    "agy",
+    "dsh",
+    "zcode",
 ];
 
 pub fn default_shared_app_types() -> Vec<String> {
-    SHARED_APP_TYPES.iter().map(|app| (*app).to_string()).collect()
+    SHARED_APP_TYPES
+        .iter()
+        .map(|app| (*app).to_string())
+        .collect()
 }
 
 /// Keep the allowlist ordered and unique. Unknown sources never enter export SQL.
