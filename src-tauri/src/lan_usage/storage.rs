@@ -898,7 +898,7 @@ mod tests {
         assert_eq!(totals[1].summary.total_requests, 4);
     }
     fn seed_local_usage(db: &Database) {
-        let conn = lock_conn!(db.conn);
+        let conn = db.conn.lock().unwrap();
         for app in super::super::SHARED_APP_TYPES {
             // Include proxy-origin statistics as well as locally imported sessions.
             conn.execute(
@@ -946,7 +946,7 @@ mod tests {
         assert!(none.events.is_empty());
         assert!(none.daily.is_empty());
         // Selecting none changes exports, never deletes original local records.
-        let conn = lock_conn!(db.conn);
+        let conn = db.conn.lock().unwrap();
         let local: i64 = conn
             .query_row("SELECT COUNT(*) FROM proxy_request_logs", [], |row| {
                 row.get(0)
