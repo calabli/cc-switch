@@ -65,7 +65,7 @@ export function LanUsagePanel({
     queryKey: lanKeys.devices,
     queryFn: () => lanUsageApi.listDevices(),
   });
-  const overviewQuery = useLanOverview(range);
+  const overviewQuery = useLanOverview(range, { enabled: showOverview });
 
   const shareEnabled = settingsQuery.data?.enabled ?? false;
 
@@ -74,8 +74,11 @@ export function LanUsagePanel({
     void queryClient.invalidateQueries({ queryKey: lanKeys.all });
   }, [expanded, queryClient]);
 
-  const refreshAll = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: lanKeys.all });
+  const refreshAll = useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: lanKeys.all }),
+      queryClient.invalidateQueries({ queryKey: ["usage", "multi-device"] }),
+    ]);
   }, [queryClient]);
 
   const toggleShare = async (enabled: boolean) => {
@@ -434,16 +437,22 @@ export function LanUsagePanel({
                           {device.deviceName}
                         </span>
                         <span className="truncate text-caption text-fg-3">
-                          {device.host}:{device.port} ·{" "}
-                          {usage
-                            ? t("usage.lan.deviceUsage", {
-                                tokens: fmtInt(
-                                  usage.summary.realTotalTokens,
-                                  locale,
-                                ),
-                                cost: money(usage.summary.totalCost, 2),
-                              })
-                            : t("usage.lan.deviceNoUsage")}
+                          {device.host}:{device.port}
+                          {showOverview && (
+                            <>
+                              {" "}
+                              ·{" "}
+                              {usage
+                                ? t("usage.lan.deviceUsage", {
+                                    tokens: fmtInt(
+                                      usage.summary.realTotalTokens,
+                                      locale,
+                                    ),
+                                    cost: money(usage.summary.totalCost, 2),
+                                  })
+                                : t("usage.lan.deviceNoUsage")}
+                            </>
+                          )}
                         </span>
                         {device.lastError && (
                           <span className="truncate text-caption text-danger">

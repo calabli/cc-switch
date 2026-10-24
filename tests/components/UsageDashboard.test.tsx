@@ -656,10 +656,9 @@ describe("UsageDashboard", () => {
     const logsTab = screen.getByRole("tab", { name: /^usage\.requestLogs/ });
     expect(logsTab).toHaveAttribute("id", "usage-tab-logs");
     expect(logsTab).toHaveAttribute("aria-controls", "usage-tabpanel");
-    expect(screen.getByRole("tabpanel")).toHaveAttribute(
-      "aria-labelledby",
-      "usage-tab-logs",
-    );
+    expect(
+      screen.getByRole("tabpanel", { name: /^usage\.requestLogs/ }),
+    ).toHaveAttribute("aria-labelledby", "usage-tab-logs");
 
     logsTab.focus();
     await user.keyboard("{ArrowRight}");
@@ -668,10 +667,9 @@ describe("UsageDashboard", () => {
     });
     expect(providersTab).toHaveAttribute("aria-selected", "true");
     expect(providersTab).toHaveFocus();
-    expect(screen.getByRole("tabpanel")).toHaveAttribute(
-      "aria-labelledby",
-      "usage-tab-providers",
-    );
+    expect(
+      screen.getByRole("tabpanel", { name: /^usage\.tabs\.providers/ }),
+    ).toHaveAttribute("aria-labelledby", "usage-tab-providers");
 
     await user.keyboard("{End}");
     expect(

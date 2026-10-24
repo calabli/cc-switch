@@ -650,4 +650,26 @@ mod tests {
         );
         server.abort();
     }
+    #[test]
+    fn exported_totals_preserve_late_details_on_a_day_that_already_has_rollups() {
+        let peer = Database::memory().unwrap();
+        seed(&peer, "proxy");
+        {
+            let conn = peer.conn.lock().unwrap();
+            conn.execute("UPDATE proxy_request_logs SET created_at = 1714564800", []).unwrap();
+            conn.execute("INSERT INTO usage_daily_rollups (date,app_type,provider_id,model,request_model,pricing_model,
+                request_count,success_count,input_tokens,input_token_semantics,total_cost_usd)
+                VALUES ('2024-05-01','codex','shared','raw-model','alias','priced-model',4,4,280,2,'12')", []).unwrap();
+        }
+        let native = peer.get_usage_summary(None,None,None,Some("Shared"),Some("priced-model")).unwrap();
+        let receiver = Database::memory().unwrap();
+        let export = connect(&receiver,&peer);
+        assert_eq!(export.events.len(),1);
+        assert_eq!(export.daily.len(),1);
+        let combined = database(&receiver).unwrap().get_usage_summary(None,None,None,Some("Shared"),Some("priced-model")).unwrap();
+        assert_eq!(combined.total_requests,native.total_requests);
+        assert_eq!(combined.total_input_tokens,native.total_input_tokens);
+        assert_eq!(combined.total_cost,native.total_cost);
+    }
+
 }

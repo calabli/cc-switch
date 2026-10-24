@@ -282,4 +282,31 @@ describe("useUsageAutoRefresh", () => {
     finish?.();
     await flush();
   });
+  it("pulls peers when the view changes during an already running local scan", async () => {
+    let finishLocal: ((result: SessionSyncResult) => void) | undefined;
+    syncMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishLocal = resolve;
+      }),
+    );
+    const onSynced = vi.fn().mockResolvedValue(undefined);
+    const { result, rerender } = renderHook(
+      ({ multi }) =>
+        useUsageAutoRefresh({
+          refreshIntervalMs: 5000,
+          sessionAutoSyncEnabled: true,
+          onSynced: multi ? onSynced : undefined,
+        }),
+      { wrapper, initialProps: { multi: false } },
+    );
+    await flush();
+    rerender({ multi: true });
+    const shared = result.current.syncSessionUsage();
+    await act(async () => {
+      finishLocal?.(syncResult);
+      await shared;
+    });
+    expect(syncMock).toHaveBeenCalledTimes(1);
+    expect(onSynced).toHaveBeenCalledTimes(1);
+  });
 });

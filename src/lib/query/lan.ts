@@ -13,9 +13,13 @@ export const lanKeys = {
 };
 
 /** Stable selection keys, with moving endpoints resolved at fetch time like local usage. */
-export function useLanOverview(range: UsageRangeSelection) {
+export function useLanOverview(
+  range: UsageRangeSelection,
+  options?: { enabled?: boolean },
+) {
   return useQuery({
     queryKey: lanKeys.overview(range),
+    enabled: options?.enabled ?? true,
     queryFn: () => {
       const { startDate, endDate } = resolveUsageRange(range);
       return lanUsageApi.getOverview(startDate, endDate);

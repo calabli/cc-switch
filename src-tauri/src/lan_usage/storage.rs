@@ -368,8 +368,7 @@ pub fn store_export(db: &Database, export: &UsageExport) -> Result<usize, AppErr
 /// 本机的共享导出：按勾选应用过滤明细与历史汇总，只读取统计字段。
 ///
 /// 明细取 `proxy_request_logs` 中勾选应用的行；已经被收进按天汇总表的历史
-/// 从 `usage_daily_rollups` 取，并且跳过那些已经出现在汇总表里的日期，避免同一
-/// 天被算两遍。
+/// 从 `usage_daily_rollups` 取。保留汇总后迟到的新明细，与本机原查询完全一致。
 pub fn export_local_usage(db: &Database) -> Result<UsageExport, AppError> {
     let settings = super::identity::share_settings(db);
     let device = super::identity::device_info(db)?;
@@ -402,13 +401,7 @@ pub fn export_local_usage(db: &Database) -> Result<UsageExport, AppError> {
                         l.first_token_ms, l.duration_ms, l.is_streaming, l.cost_multiplier
                  FROM proxy_request_logs l LEFT JOIN providers p ON l.provider_id = p.id AND l.app_type = p.app_type
                  WHERE l.app_type IN ({app_types}) AND {effective}
-                   AND NOT EXISTS (
-                     SELECT 1 FROM usage_daily_rollups r
-                     WHERE r.app_type = l.app_type AND r.provider_id = l.provider_id
-                       AND r.model = l.model AND r.request_model = COALESCE(l.request_model, '')
-                       AND r.pricing_model = COALESCE(l.pricing_model, '')
-                       AND r.date = date(datetime(l.created_at, 'unixepoch', 'localtime'))
-                   )"
+"
             ))
             .map_err(|e| AppError::Database(e.to_string()))?;
         let rows = stmt

@@ -33,6 +33,10 @@ export function useUsageAutoRefresh({
 }: UsageAutoRefreshOptions) {
   const queryClient = useQueryClient();
   const pendingSync = useRef<Promise<SessionSyncResult> | null>(null);
+  // A local scan may already be in flight when the user enters multi-device view.
+  // Read the current follow-up at completion so sharing that scan still pulls peers.
+  const onSyncedRef = useRef(onSynced);
+  onSyncedRef.current = onSynced;
 
   // 手动同步复用尚未完成的静默扫描；慢扫描不会在后端互斥锁前排队累积。
   const syncSessionUsage = useCallback(() => {
@@ -40,7 +44,7 @@ export function useUsageAutoRefresh({
       pendingSync.current = usageApi
         .syncSessionUsage()
         .then(async (result) => {
-          await onSynced?.();
+          await onSyncedRef.current?.();
           return result;
         })
         .finally(() => {
@@ -48,7 +52,7 @@ export function useUsageAutoRefresh({
         });
     }
     return pendingSync.current;
-  }, [onSynced]);
+  }, []);
 
   useEffect(() => {
     if (!sessionAutoSyncEnabled || refreshIntervalMs <= 0 || paused) return;
@@ -91,6 +95,7 @@ export function useUsageAutoRefresh({
     refreshIntervalMs,
     sessionAutoSyncEnabled,
     syncSessionUsage,
+    onSynced,
   ]);
 
   useEffect(() => {
