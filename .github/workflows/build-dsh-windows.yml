@@ -1,8 +1,17 @@
 name: Build Harness usage (Windows + macOS)
+# 只保留手动触发。
+#
+# 这个仓库是 upstream 的 fork，GitHub 会按「Actions 用量规模」给 fork 设闸：
+# 每次 push 都出 Windows + 两个 macOS 的包，用量很快顶到上限，GitHub 就会以
+# "Workflows are not currently being run on this fork due to the scale of GitHub
+# Actions usage" 为由把整个 fork 的 Actions 关掉（2026-10-24 被关过一次，
+# 只有仓库管理员在网页上点 re-enable 才能恢复）。
+#
+# 所以分工改成：
+#   - 日常反馈：dsh-check.yml（Linux，跑 clippy + 单测），push 自动触发
+#   - 出包：这里手动触发；上游同步完由 sync-upstream.yml 显式调起来
 on:
   workflow_dispatch:
-  push:
-    branches: ["codex/dsh-usage"]
 permissions:
   contents: read
 concurrency:

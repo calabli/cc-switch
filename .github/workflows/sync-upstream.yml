@@ -5,6 +5,9 @@ name: Sync upstream release
 #
 # 合不上的话不会硬来：merge 冲突时这个 job 直接失败并列出冲突文件，
 # 人工处理完再手动重跑（workflow_dispatch 可以指定版本）。
+#
+# 注意：出包的 workflow 已经改成「仅手动触发」（省 fork 的 Actions 额度，
+# 详见 build-dsh-windows.yml 顶部注释），所以这里 push 之后要显式调一次它。
 on:
   schedule:
     # 每天 UTC 04:23。避开整点，GitHub 整点的定时任务排队最严重。
@@ -18,6 +21,8 @@ on:
 
 permissions:
   contents: write
+  # 用来 dispatch 出包的 workflow（actions: write）
+  actions: write
 
 concurrency:
   group: sync-upstream
@@ -99,7 +104,7 @@ jobs:
             echo "  git checkout codex/dsh-usage"
             echo "  git fetch upstream 'refs/tags/$TAG:refs/tags/$TAG'"
             echo "  git merge refs/tags/$TAG   # 手动解决冲突"
-            echo "  解决后 push，CI 会自动重新构建"
+            echo "  解决后 push，再手动触发 build-dsh-windows.yml 出包"
             git merge --abort || true
             exit 1
           fi
@@ -162,7 +167,17 @@ jobs:
               -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
               commit -m "chore(sync): merge upstream ${{ steps.upstream.outputs.tag }} and bump to ${{ steps.bump.outputs.new }}"
           git push origin codex/dsh-usage
-          echo "已 push，build-dsh-windows.yml 会自动开始构建"
+          echo "已 push"
+
+      - name: Trigger build workflow
+        if: steps.check.outputs.need == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # 出包 workflow 只认手动触发，这里显式叫起来。
+          gh workflow run build-dsh-windows.yml --ref codex/dsh-usage
+          echo "已触发 build-dsh-windows.yml（手动模式）"
 
       - name: Summary
         if: always()
