@@ -2557,7 +2557,20 @@
       "pricingSummary": "按模型设置每百万 Tokens 的价格，可从 models.dev 同步",
       "managePricing": "管理定价…"
     },
+    "views": {
+      "label": "用量视图",
+      "local": "用量概览",
+      "multi": "多设备同步"
+    },
     "lan": {
+      "deviceUsageTitle": "设备用量",
+      "manageDevices": "管理设备",
+      "deviceName": "设备名称",
+      "scope": "范围",
+      "combinedHint": "本机与已连接设备的合计",
+      "setupHint": "连接设备后，用量将在这里统一展示。",
+      "loadFailed": "无法读取多设备用量，请重试。",
+      "retry": "重试",
       "title": "局域网设备",
       "shareLabel": "共享本机用量",
       "shareHint": "仅共享勾选应用的用量指标（含会话导入和代理统计），不共享对话正文、请求内容或密钥。",
@@ -2592,7 +2605,8 @@
       "syncPartial": "同步完成，拉回 {{count}} 条，{{failed}} 台设备失败",
       "syncFailed": "局域网用量同步失败：{{error}}",
       "manualPlaceholder": "对方 IP（可选 :端口）",
-      "manualConnect": "按地址连接"
+      "manualConnect": "按地址连接",
+      "trendScopeHint": "当前趋势仅包含已同步的远端历史汇总。"
     }
   },
   "usageScript": {

@@ -2557,7 +2557,20 @@
       "pricingSummary": "Set per-model prices per million tokens, or sync them from models.dev",
       "managePricing": "Manage pricing…"
     },
+    "views": {
+      "label": "Usage views",
+      "local": "Usage overview",
+      "multi": "Multi-device sync"
+    },
     "lan": {
+      "deviceUsageTitle": "Usage by device",
+      "manageDevices": "Manage devices",
+      "deviceName": "Device name",
+      "scope": "Scope",
+      "combinedHint": "This device and connected devices combined",
+      "setupHint": "Connect a device to see its usage here.",
+      "loadFailed": "Could not load multi-device usage. Please retry.",
+      "retry": "Retry",
       "title": "LAN devices",
       "shareLabel": "Share this device's usage",
       "shareHint": "Shares usage metrics for selected apps, including imported sessions and proxy statistics, without conversation content, request bodies or API keys.",
@@ -2592,7 +2605,8 @@
       "manualPlaceholder": "Peer IP (optional :port)",
       "manualConnect": "Connect by address",
       "sourcesLabel": "Local usage sources to share",
-      "sourcesHint": "All apps are selected by default. Deselecting an app removes its imported copy on the peer after the next successful sync; local records are kept. Configure each computer separately."
+      "sourcesHint": "All apps are selected by default. Deselecting an app removes its imported copy on the peer after the next successful sync; local records are kept. Configure each computer separately.",
+      "trendScopeHint": "Trends currently include synced remote historical rollups only."
     }
   },
   "usageScript": {

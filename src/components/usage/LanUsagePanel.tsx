@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -21,7 +21,7 @@ import { toast } from "@/lib/toast";
 import { lanUsageApi } from "@/lib/api/lan";
 import { useMoneyFormat } from "@/hooks/useMoneyFormat";
 import { fmtInt, getLocaleFromLanguage } from "./format";
-import { resolveUsageRange } from "@/lib/usageRange";
+import { lanKeys, useLanOverview } from "@/lib/query/lan";
 import type { UsageRangeSelection } from "@/types/usage";
 import type {
   LanSharedAppType,
@@ -30,20 +30,18 @@ import type {
   LanUsageSummary,
 } from "@/types/lan";
 
-const lanKeys = {
-  all: ["lan-usage"] as const,
-  settings: ["lan-usage", "settings"] as const,
-  devices: ["lan-usage", "devices"] as const,
-  overview: (start: number | undefined, end: number | undefined) =>
-    ["lan-usage", "overview", start ?? 0, end ?? 0] as const,
-};
-
 interface LanUsagePanelProps {
   range: UsageRangeSelection;
+  defaultExpanded?: boolean;
+  showOverview?: boolean;
 }
 
 /** 局域网用量聚合面板。按勾选应用共享本机统计数据，不转发远端副本。 */
-export function LanUsagePanel({ range }: LanUsagePanelProps) {
+export function LanUsagePanel({
+  range,
+  defaultExpanded = false,
+  showOverview = true,
+}: LanUsagePanelProps) {
   const { t, i18n } = useTranslation();
   const queryClient = useQueryClient();
   const { money } = useMoneyFormat();
@@ -51,17 +49,13 @@ export function LanUsagePanel({ range }: LanUsagePanelProps) {
     i18n.resolvedLanguage || i18n.language || "en",
   );
 
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const [scanning, setScanning] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [savingShare, setSavingShare] = useState(false);
   const [discovered, setDiscovered] = useState<LanDiscoveredDevice[]>([]);
   const [manualHost, setManualHost] = useState("");
   const [connecting, setConnecting] = useState(false);
-
-  const resolved = useMemo(() => resolveUsageRange(range), [range]);
-  const startDate = resolved.startDate;
-  const endDate = resolved.endDate;
 
   const settingsQuery = useQuery({
     queryKey: lanKeys.settings,
@@ -71,10 +65,7 @@ export function LanUsagePanel({ range }: LanUsagePanelProps) {
     queryKey: lanKeys.devices,
     queryFn: () => lanUsageApi.listDevices(),
   });
-  const overviewQuery = useQuery({
-    queryKey: lanKeys.overview(startDate, endDate),
-    queryFn: () => lanUsageApi.getOverview(startDate, endDate),
-  });
+  const overviewQuery = useLanOverview(range);
 
   const shareEnabled = settingsQuery.data?.enabled ?? false;
 
@@ -235,7 +226,7 @@ export function LanUsagePanel({ range }: LanUsagePanelProps) {
           <span className="truncate text-section text-fg-1">
             {t("usage.lan.title")}
           </span>
-          {overview && overview.combined.totalRequests > 0 && (
+          {showOverview && overview && overview.combined.totalRequests > 0 && (
             <span className="truncate text-caption text-fg-3">
               {t("usage.lan.combinedSummary", {
                 tokens: fmtInt(overview.combined.realTotalTokens, locale),
@@ -289,36 +280,41 @@ export function LanUsagePanel({ range }: LanUsagePanelProps) {
             </p>
           </fieldset>
           {/* 合计：本机 + 各远端设备 */}
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <SummaryTile
-              label={t("usage.lan.local")}
-              summary={overview?.local}
-              locale={locale}
-              detail={t("usage.lan.tileDetail", {
-                requests: fmtInt(overview?.local.totalRequests ?? 0, locale),
-                cost: money(overview?.local.totalCost, 2),
-              })}
-            />
-            <SummaryTile
-              label={t("usage.lan.remote")}
-              summary={overview?.remote}
-              locale={locale}
-              detail={t("usage.lan.tileDetail", {
-                requests: fmtInt(overview?.remote.totalRequests ?? 0, locale),
-                cost: money(overview?.remote.totalCost, 2),
-              })}
-            />
-            <SummaryTile
-              label={t("usage.lan.combined")}
-              summary={overview?.combined}
-              locale={locale}
-              emphasis
-              detail={t("usage.lan.tileDetail", {
-                requests: fmtInt(overview?.combined.totalRequests ?? 0, locale),
-                cost: money(overview?.combined.totalCost, 2),
-              })}
-            />
-          </div>
+          {showOverview && (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <SummaryTile
+                label={t("usage.lan.local")}
+                summary={overview?.local}
+                locale={locale}
+                detail={t("usage.lan.tileDetail", {
+                  requests: fmtInt(overview?.local.totalRequests ?? 0, locale),
+                  cost: money(overview?.local.totalCost, 2),
+                })}
+              />
+              <SummaryTile
+                label={t("usage.lan.remote")}
+                summary={overview?.remote}
+                locale={locale}
+                detail={t("usage.lan.tileDetail", {
+                  requests: fmtInt(overview?.remote.totalRequests ?? 0, locale),
+                  cost: money(overview?.remote.totalCost, 2),
+                })}
+              />
+              <SummaryTile
+                label={t("usage.lan.combined")}
+                summary={overview?.combined}
+                locale={locale}
+                emphasis
+                detail={t("usage.lan.tileDetail", {
+                  requests: fmtInt(
+                    overview?.combined.totalRequests ?? 0,
+                    locale,
+                  ),
+                  cost: money(overview?.combined.totalCost, 2),
+                })}
+              />
+            </div>
+          )}
 
           <div className="flex flex-wrap items-center gap-2">
             <Button

@@ -250,4 +250,36 @@ describe("useUsageAutoRefresh", () => {
     expect(syncMock).toHaveBeenCalledTimes(2);
     expect(invalidate).toHaveBeenCalledTimes(2);
   });
+  it("runs the active view refresh on the same schedule and shares the in-flight scan", async () => {
+    let finish: (() => void) | undefined;
+    const onSynced = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const { result } = renderHook(
+      () =>
+        useUsageAutoRefresh({
+          refreshIntervalMs: 5000,
+          sessionAutoSyncEnabled: true,
+          onSynced,
+        }),
+      { wrapper },
+    );
+    await flush();
+    expect(onSynced).toHaveBeenCalledTimes(1);
+    const shared = result.current.syncSessionUsage();
+    await advance(5000);
+    expect(syncMock).toHaveBeenCalledTimes(1);
+    expect(onSynced).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      finish?.();
+      await shared;
+    });
+    await advance(5000);
+    expect(onSynced).toHaveBeenCalledTimes(2);
+    finish?.();
+    await flush();
+  });
 });

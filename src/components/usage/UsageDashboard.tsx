@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/lib/toast";
@@ -68,7 +68,8 @@ import { resolveRequestLogColumns } from "./requestLogColumns";
 import type { UsageDisplaySettings } from "@/types";
 import { UsageDateRangePicker } from "./UsageDateRangePicker";
 import { UsageHeatmap } from "./UsageHeatmap";
-import { LanUsagePanel } from "./LanUsagePanel";
+import { MultiDeviceUsageTab } from "./MultiDeviceUsageTab";
+import { lanUsageApi } from "@/lib/api/lan";
 import {
   LOG_PAGE_SIZES,
   type LogPageSize,
@@ -261,6 +262,20 @@ export function UsageDashboard({
 }: UsageDashboardProps = {}) {
   const { t, i18n } = useTranslation();
   const queryClient = useQueryClient();
+  const [view, setView] = useState<"local" | "multi">("local");
+  const [lastDeviceSyncAt, setLastDeviceSyncAt] = useState<number | null>(null);
+  const refreshDevices = useCallback(async () => {
+    const results = await lanUsageApi.syncAll();
+    await queryClient.invalidateQueries({ queryKey: ["lan-usage"] });
+    const failures = results.filter((result) => result.error);
+    if (failures.length)
+      throw new Error(
+        failures
+          .map((result) => `${result.deviceName}: ${result.error}`)
+          .join("; "),
+      );
+    setLastDeviceSyncAt(Date.now());
+  }, [queryClient]);
   const [range, setRange] = useState<UsageRangeSelection>(() => ({
     preset: readRememberedChoice(
       USAGE_CHOICE_KEYS.range,
@@ -321,11 +336,15 @@ export function UsageDashboard({
   const { syncSessionUsage } = useUsageAutoRefresh({
     refreshIntervalMs,
     sessionAutoSyncEnabled,
+    onSynced: view === "multi" ? refreshDevices : undefined,
     paused: rebuildingCodex || !settingsReady,
     // 预设范围和「结束于现在」的自定义范围都随时间移动，没有新用量也要定时重算
     rollingRange: range.preset !== "custom" || !!range.liveEndTime,
   });
-  const lastSyncAt = Math.max(lastManualSyncAt ?? 0, lastScanAt ?? 0) || null;
+  const lastSyncAt =
+    view === "multi"
+      ? lastDeviceSyncAt
+      : Math.max(lastManualSyncAt ?? 0, lastScanAt ?? 0) || null;
   const [containerRef, measuredWidth] = useElementWidth<HTMLDivElement>();
   const now = useMinuteTicker();
 
@@ -922,9 +941,6 @@ export function UsageDashboard({
 
   const body = isEmpty ? (
     <div className="flex min-h-0 flex-1 flex-col items-center gap-6 overflow-y-auto scroll-stable px-6 pb-6">
-      <div className="w-full">
-        <LanUsagePanel range={range} />
-      </div>
       <div className="mt-10 flex max-w-[440px] flex-col items-center gap-3 text-center">
         <span
           aria-hidden="true"
@@ -961,7 +977,6 @@ export function UsageDashboard({
       id="main-content"
       className="flex min-h-0 flex-1 flex-col gap-8 overflow-y-auto scroll-stable px-6 pb-6 pt-1"
     >
-      <LanUsagePanel range={range} />
       {overviewPanel}
       {detailPanel}
     </div>
@@ -977,8 +992,54 @@ export function UsageDashboard({
         }
         actions={headerActions}
       />
-      {filterRow}
-      {body}
+      <PageTabs<"local" | "multi">
+        aria-label={t("usage.views.label")}
+        className="shrink-0 px-6"
+        items={[
+          { value: "local", label: t("usage.views.local") },
+          { value: "multi", label: t("usage.views.multi") },
+        ]}
+        value={view}
+        onValueChange={setView}
+        idPrefix="usage-view"
+        controls="usage-viewpanel"
+      />
+      {view === "local" ? (
+        filterRow
+      ) : (
+        <div className="flex min-h-12 shrink-0 items-center gap-2 px-6 py-2">
+          <UsageDateRangePicker
+            selection={range}
+            triggerLabel={rangeLabel}
+            onApply={applyRange}
+          />
+          <span className="text-caption text-fg-3">
+            {t("usage.lan.combinedHint")}
+          </span>
+        </div>
+      )}
+      <div
+        id="usage-viewpanel"
+        role="tabpanel"
+        aria-labelledby={`usage-view-${view}`}
+        className="flex min-h-0 flex-1 flex-col"
+      >
+        {view === "local" ? (
+          body
+        ) : (
+          <div
+            id="main-content"
+            className="flex min-h-0 flex-1 flex-col gap-8 overflow-y-auto scroll-stable px-6 pb-6 pt-1"
+          >
+            <MultiDeviceUsageTab
+              range={range}
+              metric={metric}
+              onMetricChange={setMetric}
+              compact={compact}
+            />
+          </div>
+        )}
+      </div>
 
       <RequestDetailPanel
         requestId={detailRequestId}

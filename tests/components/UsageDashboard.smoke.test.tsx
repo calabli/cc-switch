@@ -1,5 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UsageDashboard } from "@/components/usage/UsageDashboard";
@@ -24,6 +31,16 @@ const usageApiMock = vi.hoisted(() => ({
   getSessionUsageLastSync: vi.fn().mockResolvedValue(null),
   rebuildCodexUsage: vi.fn(),
 }));
+
+const lanApiMock = vi.hoisted(() => ({
+  getOverview: vi.fn(),
+  getDailyTotals: vi.fn(),
+  syncAll: vi.fn(),
+  getSettings: vi.fn(),
+  listDevices: vi.fn(),
+  saveSettings: vi.fn(),
+}));
+vi.mock("@/lib/api/lan", () => ({ lanUsageApi: lanApiMock }));
 
 // t 要稳定：真实的 i18next 也只在切语言时换 t，组件里有依赖 t 的 effect
 const i18nMock = vi.hoisted(() => ({
@@ -61,6 +78,39 @@ const summary = {
 
 describe("UsageDashboard (smoke)", () => {
   beforeEach(() => {
+    const lanSummary = {
+      ...summary,
+      totalRequests: 500,
+      successRate: 0.99,
+      successCount: 495,
+    };
+    lanApiMock.getOverview
+      .mockReset()
+      .mockResolvedValue({
+        local: lanSummary,
+        remote: lanSummary,
+        combined: lanSummary,
+        devices: [
+          {
+            deviceId: "laptop",
+            deviceName: "Test laptop",
+            isLocal: false,
+            summary: lanSummary,
+          },
+        ],
+      });
+    lanApiMock.getDailyTotals.mockReset().mockResolvedValue([]);
+    lanApiMock.syncAll.mockReset().mockResolvedValue([]);
+    lanApiMock.getSettings.mockResolvedValue({
+      enabled: false,
+      port: 17890,
+      deviceName: "A",
+      sharedAppTypes: ["claude", "codex", "dsh", "zcode"],
+      autoSync: true,
+      autoSyncIntervalSecs: 300,
+    });
+    lanApiMock.listDevices.mockResolvedValue([]);
+
     usageApiMock.syncSessionUsage.mockReset().mockResolvedValue({
       imported: 0,
       filesScanned: 0,
@@ -282,5 +332,47 @@ describe("UsageDashboard (smoke)", () => {
     expect(
       await screen.findByText("usage.pricing.modelsDevTitle"),
     ).toBeInTheDocument();
+  });
+  it("shows multi-device data in its own tab and keeps local detail tabs intact", async () => {
+    const user = userEvent.setup();
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <UsageDashboard sessionAutoSyncEnabled={false} />
+      </QueryClientProvider>,
+    );
+    expect(lanApiMock.getOverview).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("tab", { name: "usage.views.multi" }));
+    const table = await screen.findByRole("table", {
+      name: "usage.lan.deviceUsageTitle",
+    });
+    expect(await within(table).findByText("Test laptop")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("table", { name: "usage.requestLogs" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /usage.totalRequests 500/ }),
+    ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "usage.lan.manageDevices" }),
+    );
+    expect(
+      await screen.findByRole("checkbox", { name: "Codex" }),
+    ).toBeInTheDocument();
+    expect(lanApiMock.syncAll).not.toHaveBeenCalled();
+    await user.click(
+      screen.getByRole("button", { name: "usage.sessionSync.syncNow" }),
+    );
+    await waitFor(() => expect(lanApiMock.syncAll).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole("tab", { name: "usage.views.local" }));
+    expect(
+      screen.getByRole("tab", { name: /^usage.tabs.providers/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("table", { name: "usage.lan.deviceUsageTitle" }),
+    ).not.toBeInTheDocument();
+    client.clear();
   });
 });

@@ -255,30 +255,42 @@ export function formatUsageTrendTokenTickLabel(
 
 const AXIS_TICK = { fill: "var(--text-3)", fontSize: 11 };
 
-export function UsageTrendChart({
+export function UsageTrendChart(props: UsageTrendChartProps) {
+  const { data, isLoading } = useUsageTrends(
+    props.range,
+    {
+      appType: props.appType,
+      providerName: props.providerName,
+      model: props.model,
+    },
+    {
+      refetchInterval:
+        props.refreshIntervalMs > 0 ? props.refreshIntervalMs : false,
+    },
+  );
+  return <UsageTrendChartView {...props} trends={data} isLoading={isLoading} />;
+}
+
+export function UsageTrendChartView({
   range,
   metric,
-  appType,
-  providerName,
-  model,
-  refreshIntervalMs,
-}: UsageTrendChartProps) {
+  trends,
+  isLoading,
+  dailyOnly = false,
+}: UsageTrendChartProps & {
+  trends?: UsageTrendStatLike[];
+  isLoading: boolean;
+  dailyOnly?: boolean;
+}) {
   const { t, i18n } = useTranslation();
   const { money, moneyTick, rate } = useMoneyFormat();
   // 柱形图 / 曲线面积图在用量「设置」里选
   const { data: settings } = useSettingsQuery();
   const chartType = resolveTrendChartType(settings?.usageDisplay);
   const { startDate, endDate } = resolveUsageRange(range);
-  const { data: trends, isLoading } = useUsageTrends(
-    range,
-    { appType, providerName, model },
-    {
-      refetchInterval: refreshIntervalMs > 0 ? refreshIntervalMs : false,
-    },
-  );
 
   const durationSeconds = Math.max(endDate - startDate, 0);
-  const isHourly = durationSeconds <= 24 * 60 * 60;
+  const isHourly = !dailyOnly && durationSeconds <= 24 * 60 * 60;
   const language = i18n.resolvedLanguage || i18n.language || "en";
   const dateLocale = getLocaleFromLanguage(language);
   const tokenTickFormatter = useMemo(

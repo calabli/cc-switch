@@ -204,34 +204,37 @@ function SubMetric({
  * 点一格切换下方图表的指标。Tokens 的 4 个组成部分（新增输入、输出、缓存写入、缓存命中）
  * 是可选的展示项：默认收起，点分隔线正中的箭头展开成第二行，和上面 4 列对齐。
  */
-export function UsageHero({
-  range,
+export function UsageHero(props: UsageHeroProps) {
+  const { data, isLoading } = useUsageSummaryByApp(
+    props.range,
+    { providerName: props.providerName, model: props.model },
+    {
+      refetchInterval:
+        props.refreshIntervalMs > 0 ? props.refreshIntervalMs : false,
+    },
+  );
+  return <UsageHeroView {...props} summaries={data} isLoading={isLoading} />;
+}
+
+/** Shared presentation for local and multi-device usage; querying stays with the caller. */
+export function UsageHeroView({
   appType,
-  providerName,
-  model,
-  refreshIntervalMs,
   compact = false,
+  summaries,
+  isLoading,
   metric,
   onMetricChange,
-}: UsageHeroProps) {
+}: UsageHeroProps & { summaries?: UsageSummaryByApp[]; isLoading: boolean }) {
   const { t, i18n } = useTranslation();
   const { money, moneyTitle } = useMoneyFormat();
   const locale = getLocaleFromLanguage(getResolvedLang(i18n));
   const [moreOpen, setMoreOpen] = useState(false);
   const moreId = useId();
 
-  const { data, isLoading } = useUsageSummaryByApp(
-    range,
-    { providerName, model },
-    {
-      refetchInterval: refreshIntervalMs > 0 ? refreshIntervalMs : false,
-    },
-  );
-
   // No client-side filtering: totals must match the Trend/Logs/Stats below,
   // which all go through the backend's full set of app_types. The
   // KNOWN_APP_TYPES list only governs which filter chips appear.
-  const allApps = data ?? [];
+  const allApps = summaries ?? [];
   const summary = pickSummary(allApps, appType);
 
   const cacheWriteState = getCacheWriteAvailability(

@@ -8,6 +8,8 @@ interface UsageAutoRefreshOptions {
   refreshIntervalMs: number;
   sessionAutoSyncEnabled: boolean;
   paused?: boolean;
+  /** Reuse the same scan schedule and in-flight guard for the active data view. */
+  onSynced?: () => Promise<void>;
   /** 时间范围随「现在」移动（今天、最近 24 小时等） */
   rollingRange?: boolean;
 }
@@ -26,6 +28,7 @@ export function useUsageAutoRefresh({
   refreshIntervalMs,
   sessionAutoSyncEnabled,
   paused = false,
+  onSynced,
   rollingRange = false,
 }: UsageAutoRefreshOptions) {
   const queryClient = useQueryClient();
@@ -34,12 +37,18 @@ export function useUsageAutoRefresh({
   // 手动同步复用尚未完成的静默扫描；慢扫描不会在后端互斥锁前排队累积。
   const syncSessionUsage = useCallback(() => {
     if (!pendingSync.current) {
-      pendingSync.current = usageApi.syncSessionUsage().finally(() => {
-        pendingSync.current = null;
-      });
+      pendingSync.current = usageApi
+        .syncSessionUsage()
+        .then(async (result) => {
+          await onSynced?.();
+          return result;
+        })
+        .finally(() => {
+          pendingSync.current = null;
+        });
     }
     return pendingSync.current;
-  }, []);
+  }, [onSynced]);
 
   useEffect(() => {
     if (!sessionAutoSyncEnabled || refreshIntervalMs <= 0 || paused) return;
@@ -89,10 +98,12 @@ export function useUsageAutoRefresh({
     const timer = window.setInterval(() => {
       if (focusManager.isFocused()) {
         void queryClient.invalidateQueries({ queryKey: usageKeys.all });
+        if (onSynced)
+          void queryClient.invalidateQueries({ queryKey: ["lan-usage"] });
       }
     }, ROLLING_RANGE_REFRESH_MS);
     return () => window.clearInterval(timer);
-  }, [queryClient, rollingRange]);
+  }, [queryClient, rollingRange, onSynced]);
 
   return { syncSessionUsage };
 }

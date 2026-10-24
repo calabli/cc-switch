@@ -244,13 +244,28 @@ function buildSpan(
   return { start, end, weeks, monthLabels, totals };
 }
 
-export function UsageHeatmap({
+export function UsageHeatmap(props: UsageHeatmapProps) {
+  const data = useAllSpansDailyTrends(
+    {
+      appType: props.appType,
+      providerName: props.providerName,
+      model: props.model,
+    },
+    props.refreshIntervalMs,
+  );
+  return <UsageHeatmapView {...props} {...data} />;
+}
+
+export function UsageHeatmapView({
   metric,
-  appType,
-  providerName,
-  model,
-  refreshIntervalMs,
-}: UsageHeatmapProps) {
+  trends,
+  isLoading,
+  spanCount: suppliedSpanCount,
+}: UsageHeatmapProps & {
+  trends?: UsageTrendStatLike[];
+  isLoading: boolean;
+  spanCount?: number;
+}) {
   const { t, i18n } = useTranslation();
   const { money } = useMoneyFormat();
   const sectionRef = useRef<HTMLElement>(null);
@@ -272,10 +287,9 @@ export function UsageHeatmap({
   const language = i18n.resolvedLanguage || i18n.language || "en";
   const locale = getLocaleFromLanguage(language);
 
-  const { spanCount, trends, isLoading } = useAllSpansDailyTrends(
-    { appType, providerName, model },
-    refreshIntervalMs,
-  );
+  const firstDate = trends?.map((row) => row.date).sort()[0];
+  const spanCount =
+    suppliedSpanCount ?? spanCountFor(firstDate, startOfDay(new Date()));
 
   const heat = useMemo(() => {
     const byDay = new Map<string, UsageTrendStatLike>();
