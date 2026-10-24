@@ -730,6 +730,7 @@ export function UsageDashboard({
           )}
         </DropdownMenuContent>
       </DropdownMenu>
+      {view === "multi" && <MultiDeviceUsageTab range={range} />}
     </div>
   );
 
@@ -1004,41 +1005,14 @@ export function UsageDashboard({
         idPrefix="usage-view"
         controls="usage-viewpanel"
       />
-      {view === "local" ? (
-        filterRow
-      ) : (
-        <div className="flex min-h-12 shrink-0 items-center gap-2 px-6 py-2">
-          <UsageDateRangePicker
-            selection={range}
-            triggerLabel={rangeLabel}
-            onApply={applyRange}
-          />
-          <span className="text-caption text-fg-3">
-            {t("usage.lan.combinedHint")}
-          </span>
-        </div>
-      )}
+      {filterRow}
       <div
         id="usage-viewpanel"
         role="tabpanel"
         aria-labelledby={`usage-view-${view}`}
         className="flex min-h-0 flex-1 flex-col"
       >
-        {view === "local" ? (
-          body
-        ) : (
-          <div
-            id="main-content"
-            className="flex min-h-0 flex-1 flex-col gap-8 overflow-y-auto scroll-stable px-6 pb-6 pt-1"
-          >
-            <MultiDeviceUsageTab
-              range={range}
-              metric={metric}
-              onMetricChange={setMetric}
-              compact={compact}
-            />
-          </div>
-        )}
+        {body}
       </div>
 
       <RequestDetailPanel

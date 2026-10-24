@@ -2530,7 +2530,9 @@
       "manualConnect": "Connect by address",
       "sourcesLabel": "Paylaşılacak yerel kullanım kaynakları",
       "sourcesHint": "Varsayılan olarak tüm uygulamalar seçilidir. Seçimi kaldırılan uygulamanın kopyası sonraki başarılı eşitlemede diğer cihazdan silinir; yerel kayıtlar korunur. Her bilgisayarı ayrı yapılandırın.",
-      "trendScopeHint": "Grafik şu anda yalnızca eşitlenmiş uzak geçmiş özetlerini içerir."
+      "trendScopeHint": "Grafik şu anda yalnızca eşitlenmiş uzak geçmiş özetlerini içerir.",
+      "uiPreviewHint": "Çoklu cihaz birleştirmesi henüz bağlı değil. Yerel kullanım gösteriliyor.",
+      "sameFiltersHint": "Bu cihaz ve bağlı cihazların kullanımını aynı zaman, uygulama, sağlayıcı ve model filtreleriyle birleştirin."
     }
   },
   "usageScript": {

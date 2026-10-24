@@ -84,21 +84,19 @@ describe("UsageDashboard (smoke)", () => {
       successRate: 0.99,
       successCount: 495,
     };
-    lanApiMock.getOverview
-      .mockReset()
-      .mockResolvedValue({
-        local: lanSummary,
-        remote: lanSummary,
-        combined: lanSummary,
-        devices: [
-          {
-            deviceId: "laptop",
-            deviceName: "Test laptop",
-            isLocal: false,
-            summary: lanSummary,
-          },
-        ],
-      });
+    lanApiMock.getOverview.mockReset().mockResolvedValue({
+      local: lanSummary,
+      remote: lanSummary,
+      combined: lanSummary,
+      devices: [
+        {
+          deviceId: "laptop",
+          deviceName: "Test laptop",
+          isLocal: false,
+          summary: lanSummary,
+        },
+      ],
+    });
     lanApiMock.getDailyTotals.mockReset().mockResolvedValue([]);
     lanApiMock.syncAll.mockReset().mockResolvedValue([]);
     lanApiMock.getSettings.mockResolvedValue({
@@ -333,7 +331,7 @@ describe("UsageDashboard (smoke)", () => {
       await screen.findByText("usage.pricing.modelsDevTitle"),
     ).toBeInTheDocument();
   });
-  it("shows multi-device data in its own tab and keeps local detail tabs intact", async () => {
+  it("reuses the complete original dashboard and filters in the multi-device UI", async () => {
     const user = userEvent.setup();
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },
@@ -343,24 +341,49 @@ describe("UsageDashboard (smoke)", () => {
         <UsageDashboard sessionAutoSyncEnabled={false} />
       </QueryClientProvider>,
     );
-    expect(lanApiMock.getOverview).not.toHaveBeenCalled();
+    await screen.findByRole("table", { name: "usage.requestLogs" });
+    await user.click(screen.getByRole("button", { name: "Codex" }));
     await user.click(screen.getByRole("tab", { name: "usage.views.multi" }));
-    const table = await screen.findByRole("table", {
-      name: "usage.lan.deviceUsageTitle",
-    });
-    expect(await within(table).findByText("Test laptop")).toBeInTheDocument();
     expect(
-      screen.queryByRole("table", { name: "usage.requestLogs" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /usage.totalRequests 500/ }),
+      screen.getByRole("group", { name: "usage.appFilter.label" }),
     ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Codex" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByText("usage.lan.uiPreviewHint")).toBeInTheDocument();
+    expect(
+      screen.getByRole("table", { name: "usage.requestLogs" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("table", { name: "usage.lan.deviceUsageTitle" }),
+    ).not.toBeInTheDocument();
+    // Every detail tab is the original component, with the same app filter.
+    await user.click(
+      screen.getByRole("tab", { name: /^usage.tabs.providers/ }),
+    );
+    expect(
+      await screen.findByRole("row", { name: /DeepSeek/ }),
+    ).toBeInTheDocument();
+    expect(usageApiMock.getProviderStats).toHaveBeenCalledWith(
+      expect.any(Number),
+      expect.any(Number),
+      "codex",
+      undefined,
+      undefined,
+    );
+    await user.click(screen.getByRole("tab", { name: /^usage.tabs.models/ }));
+    expect(await screen.findByText("kimi-k2.6")).toBeInTheDocument();
     await user.click(
       screen.getByRole("button", { name: "usage.lan.manageDevices" }),
     );
+    const sheet = await screen.findByRole("dialog");
     expect(
-      await screen.findByRole("checkbox", { name: "Codex" }),
+      await within(sheet).findByRole("checkbox", { name: "Codex" }),
     ).toBeInTheDocument();
+    await user.click(
+      within(sheet).getByRole("button", { name: "common.close" }),
+    );
     expect(lanApiMock.syncAll).not.toHaveBeenCalled();
     await user.click(
       screen.getByRole("button", { name: "usage.sessionSync.syncNow" }),
@@ -368,10 +391,14 @@ describe("UsageDashboard (smoke)", () => {
     await waitFor(() => expect(lanApiMock.syncAll).toHaveBeenCalledTimes(1));
     await user.click(screen.getByRole("tab", { name: "usage.views.local" }));
     expect(
-      screen.getByRole("tab", { name: /^usage.tabs.providers/ }),
-    ).toBeInTheDocument();
+      screen.getByRole("tab", { name: /^usage.tabs.models/ }),
+    ).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("button", { name: "Codex" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
     expect(
-      screen.queryByRole("table", { name: "usage.lan.deviceUsageTitle" }),
+      screen.queryByText("usage.lan.uiPreviewHint"),
     ).not.toBeInTheDocument();
     client.clear();
   });

@@ -2607,7 +2607,9 @@
       "manualConnect": "Connect by address",
       "sourcesLabel": "允許同步的本機用量",
       "sourcesHint": "預設全選，可按應用程式關閉。取消勾選後，對端在下次成功同步時移除該應用程式的副本，本機紀錄保留。兩台電腦分別設定。",
-      "trendScopeHint": "目前趨勢僅包含已同步的遠端歷史彙總。"
+      "trendScopeHint": "目前趨勢僅包含已同步的遠端歷史彙總。",
+      "uiPreviewHint": "多裝置彙總尚待接入，目前顯示本機用量。",
+      "sameFiltersHint": "依目前時間、應用程式、供應商和模型篩選，彙總本機及已連線裝置的用量。"
     }
   },
   "usageScript": {
