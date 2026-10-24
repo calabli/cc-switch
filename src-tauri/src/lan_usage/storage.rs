@@ -151,13 +151,33 @@ pub fn store_export(db: &Database, export: &UsageExport) -> Result<usize, AppErr
     let now = chrono::Utc::now().timestamp();
     let mut written = 0usize;
 
+    // A source deselected by the peer must disappear from both imported tables.
+    // Older peers omit the scope, so their existing history remains compatible.
+    let selected = export.shared_app_types.as_ref().map(|apps| super::normalize_shared_app_types(apps));
+    if let Some(apps) = &selected {
+        let names: Vec<&str> = apps.iter().map(String::as_str).collect();
+        let scope = super::sql_in_list(&names);
+        for table in ["lan_usage_events", "lan_usage_daily"] {
+            let sql = if apps.is_empty() {
+                format!("DELETE FROM {table} WHERE device_id = ?1")
+            } else {
+                format!("DELETE FROM {table} WHERE device_id = ?1 AND app_type NOT IN ({scope})")
+            };
+            tx.execute(&sql, params![device_id])
+                .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+    }
+
     // 按天汇总行
     for row in &export.daily {
+        if selected.as_ref().is_some_and(|apps| !apps.contains(&row.app_type)) {
+            continue;
+        }
         // 该设备该天的明细行作废（对端已经把它收进汇总表了）
         tx.execute(
             "DELETE FROM lan_usage_events
-             WHERE device_id = ?1 AND date(created_at, 'unixepoch', 'localtime') = ?2",
-            params![device_id, row.date],
+             WHERE device_id = ?1 AND date(created_at, 'unixepoch', 'localtime') = ?2 AND app_type = ?3",
+            params![device_id, row.date, row.app_type],
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
         tx.execute(
@@ -200,12 +220,15 @@ pub fn store_export(db: &Database, export: &UsageExport) -> Result<usize, AppErr
 
     // 明细行
     for row in &export.events {
+        if selected.as_ref().is_some_and(|apps| !apps.contains(&row.app_type)) {
+            continue;
+        }
         let date = super::local_date_string(row.created_at);
         // 对端已经把那天收进汇总表了（同时收到两种粒度时以汇总为准）
         let has_daily: bool = tx
             .query_row(
-                "SELECT 1 FROM lan_usage_daily WHERE device_id = ?1 AND date = ?2 LIMIT 1",
-                params![device_id, date],
+                "SELECT 1 FROM lan_usage_daily WHERE device_id = ?1 AND date = ?2 AND app_type = ?3 LIMIT 1",
+                params![device_id, date, row.app_type],
                 |_| Ok(true),
             )
             .optional()
@@ -265,17 +288,28 @@ pub fn store_export(db: &Database, export: &UsageExport) -> Result<usize, AppErr
     Ok(written)
 }
 
-/// 本机的共享导出：只取「本地文件解析」出来的用量。
+/// 本机的共享导出：按勾选应用过滤明细与历史汇总，只读取统计字段。
 ///
-/// 明细取 `proxy_request_logs` 里来源为会话导入的行；已经被收进按天汇总表的历史
+/// 明细取 `proxy_request_logs` 中勾选应用的行；已经被收进按天汇总表的历史
 /// 从 `usage_daily_rollups` 取，并且跳过那些已经出现在汇总表里的日期，避免同一
 /// 天被算两遍。
 pub fn export_local_usage(
     db: &Database,
-) -> Result<(Vec<UsageEventRow>, Vec<DailyRollupRow>), AppError> {
+) -> Result<UsageExport, AppError> {
+    let settings = super::identity::share_settings(db);
+    let device = super::identity::device_info(db)?;
+    let selected = super::normalize_shared_app_types(&settings.shared_app_types);
+    if selected.is_empty() {
+        return Ok(UsageExport {
+            device,
+            shared_app_types: Some(selected),
+            events: Vec::new(),
+            daily: Vec::new(),
+        });
+    }
+    let selected_refs: Vec<&str> = selected.iter().map(String::as_str).collect();
+    let app_types = super::sql_in_list(&selected_refs);
     let conn = lock_conn!(db.conn);
-    let sources = super::sql_in_list(&super::SHARED_DATA_SOURCES);
-    let app_types = super::sql_in_list(&super::SHARED_APP_TYPES);
 
     let mut events = Vec::new();
     {
@@ -287,7 +321,7 @@ pub fn export_local_usage(
                         l.cache_read_cost_usd, l.cache_creation_cost_usd, l.total_cost_usd,
                         l.status_code, l.latency_ms, l.created_at
                  FROM proxy_request_logs l
-                 WHERE l.data_source IN ({sources})
+                 WHERE l.app_type IN ({app_types})
                    AND NOT EXISTS (
                      SELECT 1 FROM usage_daily_rollups r
                      WHERE r.app_type = l.app_type
@@ -325,14 +359,17 @@ pub fn export_local_usage(
     }
 
     let mut daily = Vec::new();
+    let fresh_input = fresh_input_sql("r");
     {
         let mut stmt = conn
             .prepare(&format!(
-                "SELECT r.date, r.app_type, r.model, r.request_count, r.success_count,
-                        r.input_tokens, r.output_tokens, r.cache_read_tokens, r.cache_creation_tokens,
-                        r.input_token_semantics, r.total_cost_usd, r.avg_latency_ms
+                "SELECT r.date, r.app_type, r.model, SUM(r.request_count), SUM(r.success_count),
+                        SUM({fresh_input}), SUM(r.output_tokens), SUM(r.cache_read_tokens), SUM(r.cache_creation_tokens),
+                        2, CAST(SUM(CAST(r.total_cost_usd AS REAL)) AS TEXT),
+                        CAST(COALESCE(SUM(r.avg_latency_ms * r.request_count) * 1.0 / NULLIF(SUM(r.request_count), 0), 0) AS INTEGER)
                  FROM usage_daily_rollups r
-                 WHERE r.app_type IN ({app_types})"
+                 WHERE r.app_type IN ({app_types})
+                 GROUP BY r.date, r.app_type, r.model"
             ))
             .map_err(|e| AppError::Database(e.to_string()))?;
         let rows = stmt
@@ -358,7 +395,7 @@ pub fn export_local_usage(
         }
     }
 
-    Ok((events, daily))
+    Ok(UsageExport { device, shared_app_types: Some(selected), events, daily })
 }
 
 /// 把时间区间换算成按天汇总表用的本地日期区间。
@@ -696,6 +733,7 @@ mod tests {
         let ts = ts_for("2024-05-01");
         let export = UsageExport {
             device: device("dev-a"),
+            shared_app_types: None,
             events: vec![event("r1", ts, 100), event("r2", ts + 60, 200)],
             daily: vec![],
         };
@@ -718,6 +756,7 @@ mod tests {
 
         let detail = UsageExport {
             device: device("dev-a"),
+            shared_app_types: None,
             events: vec![event("r1", ts, 100), event("r2", ts + 60, 200)],
             daily: vec![],
         };
@@ -731,6 +770,7 @@ mod tests {
 
         let rolled = UsageExport {
             device: device("dev-a"),
+            shared_app_types: None,
             events: vec![],
             daily: vec![daily("2024-05-01", 7, 999)],
         };
@@ -751,6 +791,7 @@ mod tests {
 
         let rolled = UsageExport {
             device: device("dev-a"),
+            shared_app_types: None,
             events: vec![],
             daily: vec![daily("2024-05-01", 7, 999)],
         };
@@ -758,6 +799,7 @@ mod tests {
 
         let detail = UsageExport {
             device: device("dev-a"),
+            shared_app_types: None,
             events: vec![event("r1", ts, 100)],
             daily: vec![],
         };
@@ -778,6 +820,7 @@ mod tests {
             &db,
             &UsageExport {
                 device: device("dev-a"),
+                shared_app_types: None,
                 events: vec![event("a1", ts, 100)],
                 daily: vec![],
             },
@@ -787,6 +830,7 @@ mod tests {
             &db,
             &UsageExport {
                 device: device("dev-b"),
+                shared_app_types: None,
                 events: vec![event("b1", ts, 300)],
                 daily: vec![],
             },
@@ -810,6 +854,7 @@ mod tests {
             &db,
             &UsageExport {
                 device: device("dev-a"),
+                shared_app_types: None,
                 events: vec![event("a1", ts, 100)],
                 daily: vec![],
             },
@@ -828,6 +873,7 @@ mod tests {
             &db,
             &UsageExport {
                 device: device("dev-a"),
+                shared_app_types: None,
                 events: vec![],
                 daily: vec![daily("2024-05-01", 3, 30), daily("2024-05-02", 4, 40)],
             },
@@ -839,4 +885,114 @@ mod tests {
         assert_eq!(totals[0].summary.total_requests, 3);
         assert_eq!(totals[1].summary.total_requests, 4);
     }
+    fn seed_local_usage(db: &Database) {
+        let conn = lock_conn!(db.conn);
+        for app in super::super::SHARED_APP_TYPES {
+            // Include proxy-origin statistics as well as locally imported sessions.
+            conn.execute(
+                "INSERT INTO proxy_request_logs (request_id, provider_id, app_type, model, data_source, latency_ms, status_code, created_at, input_tokens)
+                 VALUES (?1, 'fixture', ?1, 'fixture', 'proxy', 100, 200, ?2, 100)",
+                params![app, ts_for("2024-05-02")],
+            ).unwrap();
+            for provider in ["first", "second"] {
+                conn.execute(
+                    "INSERT INTO usage_daily_rollups (date, app_type, provider_id, model, request_count, success_count, input_tokens, total_cost_usd)
+                     VALUES ('2024-05-01', ?1, ?2, 'fixture', 2, 2, 200, '1.25')",
+                    params![app, provider],
+                ).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn export_filters_details_and_rollups_and_merges_provider_dimensions() {
+        let db = Database::memory().unwrap();
+        seed_local_usage(&db);
+        let all = export_local_usage(&db).unwrap();
+        assert_eq!(all.events.len(), super::super::SHARED_APP_TYPES.len());
+        assert_eq!(all.daily.len(), super::super::SHARED_APP_TYPES.len());
+        let mut settings = super::super::identity::share_settings(&db);
+        settings.shared_app_types = vec!["mcode".into()];
+        super::super::identity::save_share_settings(&db, &settings).unwrap();
+        let selected = export_local_usage(&db).unwrap();
+        assert_eq!(selected.shared_app_types, Some(vec!["mcode".into()]));
+        assert_eq!(selected.events.len(), 1);
+        assert_eq!(selected.events[0].app_type, "mcode");
+        assert_eq!(selected.daily.len(), 1);
+        assert_eq!(selected.daily[0].app_type, "mcode");
+        assert_eq!(selected.daily[0].request_count, 4);
+        assert_eq!(selected.daily[0].input_tokens, 400);
+        assert_eq!(selected.daily[0].input_token_semantics, 2);
+        assert_eq!(selected.daily[0].total_cost_usd.parse::<f64>().unwrap(), 2.5);
+        settings.shared_app_types.clear();
+        super::super::identity::save_share_settings(&db, &settings).unwrap();
+        let none = export_local_usage(&db).unwrap();
+        assert_eq!(none.shared_app_types, Some(vec![]));
+        assert!(none.events.is_empty());
+        assert!(none.daily.is_empty());
+        // Selecting none changes exports, never deletes original local records.
+        let conn = lock_conn!(db.conn);
+        let local: i64 = conn.query_row("SELECT COUNT(*) FROM proxy_request_logs", [], |row| row.get(0)).unwrap();
+        assert_eq!(local as usize, super::super::SHARED_APP_TYPES.len());
+    }
+
+    #[test]
+    fn source_revocation_clears_only_that_peers_unselected_copies() {
+        let db = Database::memory().unwrap();
+        register_device(&db, "a", "A", "10.0.0.2", 17890).unwrap();
+        register_device(&db, "b", "B", "10.0.0.3", 17890).unwrap();
+        let ts = ts_for("2024-05-02");
+        let mut zcode = event("zcode", ts, 10);
+        zcode.app_type = "zcode".into();
+        zcode.data_source = "zcode_session".into();
+        let mut export = UsageExport {
+            device: device("a"), shared_app_types: None,
+            events: vec![event("dsh", ts, 20), zcode],
+            daily: vec![daily("2024-05-01", 3, 30)],
+        };
+        store_export(&db, &export).unwrap();
+        export.device = device("b");
+        store_export(&db, &export).unwrap();
+        export.device = device("a");
+        export.shared_app_types = Some(vec!["zcode".into()]);
+        // Rows outside the declared selection are ignored even if present in the payload.
+        store_export(&db, &export).unwrap();
+        assert_eq!(device_summary(&db, "a", None, None).unwrap().total_requests, 1);
+        assert_eq!(device_summary(&db, "b", None, None).unwrap().total_requests, 5);
+        export.shared_app_types = Some(vec![]);
+        store_export(&db, &export).unwrap();
+        assert_eq!(device_summary(&db, "a", None, None).unwrap().total_requests, 0);
+        assert_eq!(device_summary(&db, "b", None, None).unwrap().total_requests, 5);
+    }
+
+    #[test]
+    fn one_apps_rollup_does_not_remove_another_apps_same_day_details() {
+        let db = Database::memory().unwrap();
+        register_device(&db, "a", "A", "10.0.0.2", 17890).unwrap();
+        let ts = ts_for("2024-05-01");
+        let mut zcode = event("zcode", ts, 10);
+        zcode.app_type = "zcode".into();
+        let mut export = UsageExport {
+            device: device("a"), shared_app_types: None,
+            events: vec![event("dsh", ts, 20), zcode.clone()], daily: vec![],
+        };
+        store_export(&db, &export).unwrap();
+        export.events.clear();
+        export.daily.push(daily("2024-05-01", 3, 30));
+        store_export(&db, &export).unwrap();
+        assert_eq!(device_summary(&db, "a", None, None).unwrap().total_requests, 4);
+        // A rollup for DSH must not suppress a new ZCode detail, either.
+        zcode.request_id = "zcode-new".into();
+        export.events.push(zcode);
+        store_export(&db, &export).unwrap();
+        assert_eq!(device_summary(&db, "a", None, None).unwrap().total_requests, 5);
+    }
+
+    #[test]
+    fn legacy_export_without_scope_remains_readable() {
+        let value = serde_json::json!({"device": device("old"), "events": [], "daily": []});
+        let export: UsageExport = serde_json::from_value(value).unwrap();
+        assert_eq!(export.shared_app_types, None);
+    }
+
 }

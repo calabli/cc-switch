@@ -6,6 +6,7 @@ use crate::error::AppError;
 
 const SETTING_DEVICE_ID: &str = "lan_device_id";
 const SETTING_DEVICE_NAME: &str = "lan_device_name";
+const SETTING_SHARED_APP_TYPES: &str = "lan_shared_app_types";
 const SETTING_SHARE_ENABLED: &str = "lan_share_enabled";
 const SETTING_SHARE_PORT: &str = "lan_share_port";
 const SETTING_AUTO_SYNC: &str = "lan_auto_sync";
@@ -83,6 +84,11 @@ pub fn share_settings(db: &Database) -> LanShareSettings {
             }
         }
     }
+    if let Ok(Some(value)) = db.get_setting(SETTING_SHARED_APP_TYPES) {
+        // Malformed persisted selections fail closed rather than sharing defaults.
+        let selected = serde_json::from_str::<Vec<String>>(&value).unwrap_or_default();
+        settings.shared_app_types = super::normalize_shared_app_types(&selected);
+    }
     settings.device_name = share_device_name(db);
     if let Ok(Some(v)) = db.get_setting(SETTING_AUTO_SYNC) {
         settings.auto_sync = matches!(v.trim(), "true" | "1");
@@ -99,6 +105,10 @@ pub fn share_settings(db: &Database) -> LanShareSettings {
 
 /// 保存局域网共享设置。
 pub fn save_share_settings(db: &Database, settings: &LanShareSettings) -> Result<(), AppError> {
+    let selected = super::normalize_shared_app_types(&settings.shared_app_types);
+    let json = serde_json::to_string(&selected)
+        .map_err(|e| AppError::Message(format!("保存共享来源失败: {e}")))?;
+    db.set_setting(SETTING_SHARED_APP_TYPES, &json)?;
     db.set_setting(
         SETTING_SHARE_ENABLED,
         if settings.enabled { "true" } else { "false" },
@@ -156,4 +166,28 @@ mod tests {
         db.set_setting(SETTING_SHARE_PORT, "0").unwrap();
         assert_eq!(share_settings(&db).port, DEFAULT_PORT);
     }
+    #[test]
+    fn shared_sources_default_to_all_and_support_empty_selection() {
+        let db = Database::memory().unwrap();
+        let mut settings = share_settings(&db);
+        assert_eq!(settings.shared_app_types, super::super::default_shared_app_types());
+        settings.shared_app_types = vec!["mcode".into(), "unknown".into(), "mcode".into()];
+        save_share_settings(&db, &settings).unwrap();
+        assert_eq!(share_settings(&db).shared_app_types, vec!["mcode"]);
+        settings.shared_app_types.clear();
+        save_share_settings(&db, &settings).unwrap();
+        assert!(share_settings(&db).shared_app_types.is_empty());
+        db.set_setting(SETTING_SHARED_APP_TYPES, "invalid json").unwrap();
+        assert!(share_settings(&db).shared_app_types.is_empty());
+    }
+
+    #[test]
+    fn older_settings_without_sources_default_to_all() {
+        let settings: LanShareSettings = serde_json::from_value(serde_json::json!({
+            "enabled": false, "port": 17890, "deviceName": "old",
+            "autoSync": true, "autoSyncIntervalSecs": 300
+        })).unwrap();
+        assert_eq!(settings.shared_app_types, super::super::default_shared_app_types());
+    }
+
 }

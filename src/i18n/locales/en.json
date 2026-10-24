@@ -2560,7 +2560,7 @@
     "lan": {
       "title": "LAN devices",
       "shareLabel": "Share this device's usage",
-      "shareHint": "Only usage parsed from local files (DSH / ZCode) is shared; proxy traffic never leaves the device.",
+      "shareHint": "Shares usage metrics for selected apps, including imported sessions and proxy statistics, without conversation content, request bodies or API keys.",
       "shareEnabled": "LAN sharing enabled",
       "shareDisabled": "LAN sharing disabled",
       "shareFailed": "Failed to save LAN settings: {{error}}",
@@ -2590,7 +2590,9 @@
       "syncPartial": "Sync finished, {{count}} rows pulled, {{failed}} device(s) failed",
       "syncFailed": "LAN usage sync failed: {{error}}",
       "manualPlaceholder": "Peer IP (optional :port)",
-      "manualConnect": "Connect by address"
+      "manualConnect": "Connect by address",
+      "sourcesLabel": "Local usage sources to share",
+      "sourcesHint": "All apps are selected by default. Deselecting an app removes its imported copy on the peer after the next successful sync; local records are kept. Configure each computer separately."
     }
   },
   "usageScript": {

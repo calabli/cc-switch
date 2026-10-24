@@ -94,15 +94,9 @@ async fn info_handler(
 async fn usage_handler(
     State(state): State<Arc<ServerState>>,
 ) -> Result<Json<UsageExport>, HandlerError> {
-    let device = identity::device_info(&state.db)
+    let export = storage::export_local_usage(&state.db)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let (events, daily) = storage::export_local_usage(&state.db)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    Ok(Json(UsageExport {
-        device,
-        events,
-        daily,
-    }))
+    Ok(Json(export))
 }
 
 /// UDP 发现应答：收到探测包就把本机身份回给发送方。

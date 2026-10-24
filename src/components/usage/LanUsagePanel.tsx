@@ -12,6 +12,9 @@ import {
   Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { APP_DISPLAY_NAME } from "@/components/shell/AppGlyph";
+import { LAN_SHARED_APPS } from "@/types/lan";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "@/lib/toast";
@@ -21,6 +24,7 @@ import { fmtInt, getLocaleFromLanguage } from "./format";
 import { resolveUsageRange } from "@/lib/usageRange";
 import type { UsageRangeSelection } from "@/types/usage";
 import type {
+  LanSharedAppType,
   LanDeviceStatus,
   LanDiscoveredDevice,
   LanUsageSummary,
@@ -38,13 +42,7 @@ interface LanUsagePanelProps {
   range: UsageRangeSelection;
 }
 
-/**
- * 局域网用量聚合面板。
- *
- * 只聚合「从本地文件解析出来的用量」（DSH / ZCode 这类会话导入）。
- * 每台设备各自跑一个只读的小服务，把这部分用量共享出来；本机点一下就能看到
- * 同一网段所有设备加起来的数据。
- */
+/** 局域网用量聚合面板。按勾选应用共享本机统计数据，不转发远端副本。 */
 export function LanUsagePanel({ range }: LanUsagePanelProps) {
   const { t, i18n } = useTranslation();
   const queryClient = useQueryClient();
@@ -80,9 +78,6 @@ export function LanUsagePanel({ range }: LanUsagePanelProps) {
 
   const shareEnabled = settingsQuery.data?.enabled ?? false;
 
-  // 没开共享、也没有连过设备时不占版面：用量页本来就不是干这个的。
-  const hasContent = shareEnabled || (devicesQuery.data?.length ?? 0) > 0;
-
   useEffect(() => {
     if (!expanded) return;
     void queryClient.invalidateQueries({ queryKey: lanKeys.all });
@@ -96,11 +91,36 @@ export function LanUsagePanel({ range }: LanUsagePanelProps) {
     if (!settingsQuery.data) return;
     setSavingShare(true);
     try {
-      await lanUsageApi.saveSettings({ ...settingsQuery.data, enabled });
-      await refreshAll();
+      const saved = await lanUsageApi.saveSettings({
+        ...settingsQuery.data,
+        enabled,
+      });
+      queryClient.setQueryData(lanKeys.settings, saved);
+      refreshAll();
       toast.success(
         enabled ? t("usage.lan.shareEnabled") : t("usage.lan.shareDisabled"),
       );
+    } catch (error) {
+      toast.error(t("usage.lan.shareFailed", { error: String(error) }));
+    } finally {
+      setSavingShare(false);
+    }
+  };
+
+  const toggleSource = async (app: LanSharedAppType, checked: boolean) => {
+    if (!settingsQuery.data || savingShare) return;
+    const selected = settingsQuery.data.sharedAppTypes;
+    const sharedAppTypes = checked
+      ? [...selected, app]
+      : selected.filter((source) => source !== app);
+    setSavingShare(true);
+    try {
+      const saved = await lanUsageApi.saveSettings({
+        ...settingsQuery.data,
+        sharedAppTypes,
+      });
+      queryClient.setQueryData(lanKeys.settings, saved);
+      refreshAll();
     } catch (error) {
       toast.error(t("usage.lan.shareFailed", { error: String(error) }));
     } finally {
@@ -195,8 +215,6 @@ export function LanUsagePanel({ range }: LanUsagePanelProps) {
     }
   };
 
-  if (!hasContent) return null;
-
   const overview = overviewQuery.data;
 
   return (
@@ -241,6 +259,35 @@ export function LanUsagePanel({ range }: LanUsagePanelProps) {
 
       {expanded && (
         <div className="flex flex-col gap-4 border-t border-border px-4 py-3">
+          <fieldset
+            className="m-0 flex flex-col gap-2 border-0 p-0"
+            disabled={savingShare || !settingsQuery.data}
+          >
+            <legend className="mb-2 text-body text-fg-1">
+              {t("usage.lan.sourcesLabel")}
+            </legend>
+            <div className="flex flex-wrap gap-4">
+              {LAN_SHARED_APPS.map((app) => (
+                <label
+                  key={app}
+                  className="flex items-center gap-2 text-body text-fg-1"
+                >
+                  <Checkbox
+                    checked={
+                      settingsQuery.data?.sharedAppTypes?.includes(app) ?? false
+                    }
+                    onCheckedChange={(checked) =>
+                      void toggleSource(app, checked)
+                    }
+                  />
+                  {APP_DISPLAY_NAME[app]}
+                </label>
+              ))}
+            </div>
+            <p className="m-0 text-caption text-fg-3">
+              {t("usage.lan.sourcesHint")}
+            </p>
+          </fieldset>
           {/* 合计：本机 + 各远端设备 */}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <SummaryTile

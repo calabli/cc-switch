@@ -1,19 +1,6 @@
-//! 局域网用量聚合。
-//!
-//! 场景：同一间办公室/宿舍里有多台机器，每台都装了 cc-switch，各自解析本地的
-//! 会话文件（DSH / ZCode 这类「从本地文件读用量」的来源），想在一处看到**所有
-//! 设备加起来**的用量。
-//!
-//! 做法：
-//! 1. 每台设备开一个只读的小 HTTP 服务（`server.rs`），对外只暴露**本地文件解析**
-//!    出来的用量行，代理转发流量这类本机内部数据不出网。
-//! 2. 同一局域网用 UDP 广播互相发现（`discovery.rs`），点一下就能连上，不用手输 IP。
-//! 3. 连上的设备把对方的用量行拉到自己库里（`client.rs` + `storage.rs`），按设备
-//!    维度分开存。
-//! 4. `aggregate.rs` 把「本机 + 各远端设备」汇成一份总计和按设备/按天的拆分。
-//!
-//! 只共享本地文件解析出来的用量（`dsh_session` / `zcode_session`），其它来源一概
-//! 不外传。
+//! 局域网用量聚合：各设备按用户勾选的应用导出本机统计数据。
+//! 只传用量指标和模型/会话标识，不传对话正文、请求内容或密钥。
+//! UDP 发现设备，HTTP 拉取本机记录；远端副本不再转发。
 
 pub mod aggregate;
 pub mod client;
@@ -139,13 +126,23 @@ pub const DEFAULT_PORT: u16 = 17890;
 /// UDP 发现探测包的魔数。只认这个魔数的包，避免误响应局域网里的其它广播。
 pub const DISCOVERY_MAGIC: &str = "CC_SWITCH_LAN_DISCOVER_V1";
 
-/// 允许跨设备共享的用量来源：只有「解析本地文件」导入的会话用量。
-///
-/// 代理转发（`proxy`）是本机内部流量，不出网。
-pub const SHARED_DATA_SOURCES: [&str; 2] = ["dsh_session", "zcode_session"];
+/// All supported usage apps; sharing exports metrics, never request/response bodies.
+pub const SHARED_APP_TYPES: [&str; 14] = [
+    "claude", "claude-desktop", "codex", "gemini", "grokbuild", "opencode", "openclaw", "hermes", "pi", "mcode", "kimi", "agy", "dsh", "zcode"
+];
 
-/// 上述来源对应的 app_type，用于在按天汇总表里取同样的范围。
-pub const SHARED_APP_TYPES: [&str; 2] = ["dsh", "zcode"];
+pub fn default_shared_app_types() -> Vec<String> {
+    SHARED_APP_TYPES.iter().map(|app| (*app).to_string()).collect()
+}
+
+/// Keep the allowlist ordered and unique. Unknown sources never enter export SQL.
+pub fn normalize_shared_app_types(selected: &[String]) -> Vec<String> {
+    SHARED_APP_TYPES
+        .iter()
+        .filter(|app| selected.iter().any(|value| value == **app))
+        .map(|app| (*app).to_string())
+        .collect()
+}
 
 /// 本机身份信息。局域网里用它区分「谁是谁」。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -209,6 +206,10 @@ pub struct DailyRollupRow {
 #[serde(rename_all = "camelCase")]
 pub struct UsageExport {
     pub device: DeviceInfo,
+    /// None means an older peer: preserve its previously imported sources.
+    /// Some([]) explicitly revokes every shared source on the next successful sync.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shared_app_types: Option<Vec<String>>,
     /// 还在明细表里的请求级记录。
     pub events: Vec<UsageEventRow>,
     /// 已收进按天汇总表的历史记录。
@@ -339,6 +340,8 @@ pub struct LanDailyTotal {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LanShareSettings {
+    #[serde(default = "default_shared_app_types")]
+    pub shared_app_types: Vec<String>,
     /// 是否对外提供本机用量（关掉就完全不对局域网暴露）。
     pub enabled: bool,
     pub port: u16,
@@ -352,6 +355,7 @@ pub struct LanShareSettings {
 impl Default for LanShareSettings {
     fn default() -> Self {
         Self {
+            shared_app_types: default_shared_app_types(),
             enabled: false,
             port: DEFAULT_PORT,
             device_name: String::new(),

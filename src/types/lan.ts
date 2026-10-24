@@ -70,7 +70,29 @@ export interface LanDailyTotal {
 }
 
 /** 局域网共享设置 */
+import type { AppId } from "@/lib/api/types";
+
+export type LanSharedAppType = AppId | "dsh" | "zcode";
+
+export const LAN_SHARED_APPS: readonly LanSharedAppType[] = [
+  "claude",
+  "claude-desktop",
+  "codex",
+  "gemini",
+  "grokbuild",
+  "opencode",
+  "openclaw",
+  "hermes",
+  "pi",
+  "mcode",
+  "kimi",
+  "agy",
+  "dsh",
+  "zcode",
+];
+
 export interface LanShareSettings {
+  sharedAppTypes: LanSharedAppType[];
   enabled: boolean;
   port: number;
   deviceName: string;

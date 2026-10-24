@@ -4,11 +4,6 @@ use super::{storage, LanDeviceUsage, LanUsageOverview, LanUsageSummary};
 use crate::database::Database;
 use crate::error::AppError;
 
-/// 本机自己的共享来源对应的 app_type。
-///
-/// 只有这些来源是「从本地文件解析用量」来的，也正是允许跨设备共享的部分。
-const LOCAL_SHARED_APP_TYPES: [&str; 2] = ["dsh", "zcode"];
-
 /// 本机在给定区间内的共享用量合计。
 ///
 /// 直接复用 Dashboard 的统计口径（明细 + 按天汇总表），本机这边的历史因此和
@@ -19,8 +14,8 @@ pub fn local_summary(
     end: Option<i64>,
 ) -> Result<LanUsageSummary, AppError> {
     let mut total = LanUsageSummary::default();
-    for app_type in LOCAL_SHARED_APP_TYPES {
-        let summary = db.get_usage_summary(start, end, Some(app_type), None, None)?;
+    for app_type in super::identity::share_settings(db).shared_app_types {
+        let summary = db.get_usage_summary(start, end, Some(&app_type), None, None)?;
         // 本机的 UsageSummary 只给了成功率，成功条数按比例还原（够展示用）。
         let success_count = (summary.success_rate * summary.total_requests as f32).round() as u64;
         total = total.add(&LanUsageSummary {
