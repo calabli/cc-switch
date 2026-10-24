@@ -41,6 +41,10 @@ export const lanUsageApi = {
   ): Promise<LanDeviceStatus> =>
     invoke("connect_lan_device", { deviceId, deviceName, host, port }),
 
+  /** 手动按地址连接（广播被挡时用） */
+  connectByHost: async (host: string, port?: number): Promise<LanDeviceStatus> =>
+    invoke("connect_lan_device_by_host", { host, port }),
+
   /** 断开一台设备 */
   disconnect: async (deviceId: string): Promise<void> =>
     invoke("disconnect_lan_device", { deviceId }),

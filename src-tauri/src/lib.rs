@@ -1795,6 +1795,7 @@ pub fn run() {
             commands::discover_lan_devices,
             commands::list_lan_devices,
             commands::connect_lan_device,
+            commands::connect_lan_device_by_host,
             commands::disconnect_lan_device,
             commands::set_lan_device_enabled,
             commands::sync_lan_devices,

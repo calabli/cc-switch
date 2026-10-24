@@ -12,6 +12,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "@/lib/toast";
 import { lanUsageApi } from "@/lib/api/lan";
@@ -57,6 +58,8 @@ export function LanUsagePanel({ range }: LanUsagePanelProps) {
   const [syncing, setSyncing] = useState(false);
   const [savingShare, setSavingShare] = useState(false);
   const [discovered, setDiscovered] = useState<LanDiscoveredDevice[]>([]);
+  const [manualHost, setManualHost] = useState("");
+  const [connecting, setConnecting] = useState(false);
 
   const resolved = useMemo(() => resolveUsageRange(range), [range]);
   const startDate = resolved.startDate;
@@ -130,6 +133,22 @@ export function LanUsagePanel({ range }: LanUsagePanelProps) {
       toast.success(t("usage.lan.connected", { name: device.deviceName }));
     } catch (error) {
       toast.error(t("usage.lan.connectFailed", { error: String(error) }));
+    }
+  };
+
+  const connectByHost = async () => {
+    const host = manualHost.trim();
+    if (!host) return;
+    setConnecting(true);
+    try {
+      await lanUsageApi.connectByHost(host);
+      setManualHost("");
+      await refreshAll();
+      toast.success(t("usage.lan.connected", { name: host }));
+    } catch (error) {
+      toast.error(t("usage.lan.connectFailed", { error: String(error) }));
+    } finally {
+      setConnecting(false);
     }
   };
 
@@ -282,6 +301,30 @@ export function LanUsagePanel({ range }: LanUsagePanelProps) {
                 <RefreshCw className="h-3.5 w-3.5" />
               )}
               {t("usage.lan.syncNow")}
+            </Button>
+            <Input
+              className="h-7 w-[180px] text-body"
+              placeholder={t("usage.lan.manualPlaceholder")}
+              value={manualHost}
+              onChange={(e) => setManualHost(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void connectByHost();
+              }}
+              aria-label={t("usage.lan.manualPlaceholder")}
+            />
+            <Button
+              type="button"
+              variant="neutral"
+              size="compact"
+              disabled={connecting || manualHost.trim().length === 0}
+              onClick={() => void connectByHost()}
+            >
+              {connecting ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Plug className="h-3.5 w-3.5" />
+              )}
+              {t("usage.lan.manualConnect")}
             </Button>
             <span className="text-caption text-fg-3">
               {t("usage.lan.shareHint")}

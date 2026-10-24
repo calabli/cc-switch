@@ -61,16 +61,12 @@ pub async fn sync_device(db: &Database, device_id: &str) -> Result<usize, AppErr
     };
 
     match fetch_export(&host, port).await {
-        Ok(export) => {
+        Ok(mut export) => {
             // 对端的 device_id 才是权威：防止有人改了 URL 指向别的机器，
             // 导致数据串到错误的设备名下。
-            let export = if export.device.device_id == device_id {
-                export
-            } else {
-                let mut export = export;
+            if export.device.device_id != device_id {
                 export.device.device_id = device_id.to_string();
-                export
-            };
+            }
             let written = storage::store_export(db, &export)?;
             storage::record_sync_result(db, device_id, written as i64, None)?;
             Ok(written)

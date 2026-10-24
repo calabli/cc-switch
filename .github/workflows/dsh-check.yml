@@ -124,6 +124,7 @@ jobs:
           pnpm --version
 
       - name: Get pnpm store directory
+        id: pnpm-store
         shell: bash
         run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
 

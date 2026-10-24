@@ -21,6 +21,9 @@ pub fn local_summary(
     let mut total = LanUsageSummary::default();
     for app_type in LOCAL_SHARED_APP_TYPES {
         let summary = db.get_usage_summary(start, end, Some(app_type), None, None)?;
+        // 本机的 UsageSummary 只给了成功率，成功条数按比例还原（够展示用）。
+        let success_count =
+            (summary.success_rate * summary.total_requests as f32).round() as u64;
         total = total.add(&LanUsageSummary {
             total_requests: summary.total_requests,
             total_cost: summary.total_cost.clone(),
@@ -31,7 +34,7 @@ pub fn local_summary(
             success_rate: summary.success_rate,
             real_total_tokens: summary.real_total_tokens,
             cache_hit_rate: summary.cache_hit_rate,
-            success_count: 0,
+            success_count,
         });
     }
     Ok(total)

@@ -2588,7 +2588,9 @@
       "syncNow": "Refresh combined total",
       "syncDone": "Sync finished, {{count}} usage rows pulled",
       "syncPartial": "Sync finished, {{count}} rows pulled, {{failed}} device(s) failed",
-      "syncFailed": "LAN usage sync failed: {{error}}"
+      "syncFailed": "LAN usage sync failed: {{error}}",
+      "manualPlaceholder": "Peer IP (optional :port)",
+      "manualConnect": "Connect by address"
     }
   },
   "usageScript": {

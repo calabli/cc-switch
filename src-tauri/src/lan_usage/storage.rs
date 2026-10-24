@@ -144,7 +144,7 @@ pub fn record_sync_result(
 /// 这样同一台设备的同一天永远只有一种粒度，聚合时直接相加不会重复计数。
 pub fn store_export(db: &Database, export: &UsageExport) -> Result<usize, AppError> {
     let device_id = export.device.device_id.as_str();
-    let conn = lock_conn!(db.conn);
+    let mut conn = lock_conn!(db.conn);
     let tx = conn
         .transaction()
         .map_err(|e| AppError::Database(e.to_string()))?;
@@ -432,6 +432,26 @@ pub fn remote_summary(
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(LanUsageSummary::default()),
         Err(e) => Err(AppError::Database(e.to_string())),
     }
+}
+
+/// 每台远端设备在给定区间内的用量合计。
+pub fn per_device_summaries(
+    db: &Database,
+    start: Option<i64>,
+    end: Option<i64>,
+) -> Result<Vec<LanDeviceUsage>, AppError> {
+    let devices = list_devices(db)?;
+    let mut out = Vec::new();
+    for device in devices {
+        let summary = device_summary(db, &device.device_id, start, end)?;
+        out.push(LanDeviceUsage {
+            device_id: device.device_id.clone(),
+            device_name: device.device_name.clone(),
+            is_local: false,
+            summary,
+        });
+    }
+    Ok(out)
 }
 
 /// 单台设备的用量合计。

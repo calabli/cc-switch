@@ -2588,7 +2588,9 @@
       "syncNow": "一键刷新合计",
       "syncDone": "同步完成，共拉回 {{count}} 条用量",
       "syncPartial": "同步完成，拉回 {{count}} 条，{{failed}} 台设备失败",
-      "syncFailed": "局域网用量同步失败：{{error}}"
+      "syncFailed": "局域网用量同步失败：{{error}}",
+      "manualPlaceholder": "对方 IP（可选 :端口）",
+      "manualConnect": "按地址连接"
     }
   },
   "usageScript": {

@@ -90,6 +90,29 @@ pub async fn connect_lan_device(
         .ok_or_else(|| AppError::Message("设备登记后未找到".to_string()))
 }
 
+/// 手动按地址连接：先问对方是谁，再登记并同步。
+///
+/// 局域网广播被网络策略挡掉时走这条路。
+#[tauri::command]
+pub async fn connect_lan_device_by_host(
+    state: State<'_, AppState>,
+    host: String,
+    port: Option<u16>,
+) -> Result<LanDeviceStatus, AppError> {
+    let port = port.unwrap_or(crate::lan_usage::DEFAULT_PORT);
+    let info = client::fetch_info(&host, port).await?;
+    let device_id = info.device_id.clone();
+    let device_name = info.device_name.clone();
+    storage::register_device(&state.db, &device_id, &device_name, &host, port)?;
+    if let Err(e) = client::sync_device(&state.db, &device_id).await {
+        log::warn!("手动连接 {device_id} 后首次同步失败: {e}");
+    }
+    storage::list_devices(&state.db)?
+        .into_iter()
+        .find(|d| d.device_id == device_id)
+        .ok_or_else(|| AppError::Message("设备登记后未找到".to_string()))
+}
+
 /// 断开一台设备，并清掉它拉回来的用量。
 #[tauri::command]
 pub fn disconnect_lan_device(
